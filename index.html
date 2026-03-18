@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>Backrooms - Completed Fixes</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #dac05e; touch-action: none; font-family: monospace; }
+        #ui-container { position: absolute; width: 100%; height: 100%; pointer-events: none; z-index: 100; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-end; padding: 20px; box-sizing: border-box; }
+        .btn { pointer-events: auto; padding: 15px; background: rgba(0,0,0,0.85); color: white; border: 2px solid #fff; border-radius: 8px; font-size: 14px; margin-bottom: 10px; min-width: 160px; font-weight: bold; text-align: center; }
+        #build-btn { background: #e6b400; color: #000; }
+        #action-btn { background: #ff4757; display: none; min-height: 60px; font-size: 18px; }
+        #move-zone { position: absolute; bottom: 30px; left: 30px; width: 80px; height: 80px; background: rgba(255,255,255,0.1); border-radius: 50%; border: 1px solid rgba(0,0,0,0.2); pointer-events: auto; }
+        #stick { position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; margin: -15px; background: rgba(0,0,0,0.4); border-radius: 50%; }
+    </style>
+</head>
+<body>
+    <div id="move-zone"><div id="stick"></div></div>
+    <div id="ui-container">
+        <button id="action-btn" class="btn">OPEN/CLOSE SHUTTER</button>
+        <button id="place-btn" class="btn" style="display:none; background: #28a745;">PLACE ITEM</button>
+        <button id="type-btn" class="btn" style="display:none; background: #007bff;">TYPE: SHUTTER</button>
+        <button id="build-btn" class="btn">BUILD MODE</button>
+    </div>
+
+    <script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        const scene = new THREE.Scene();
+        const bgColor = 0xdac05e;
+        scene.background = new THREE.Color(bgColor);
+        scene.fog = new THREE.Fog(bgColor, 1, 100); // フォグも100mまで延長
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100); // 描画距離を100mに大幅延長
+        camera.position.set(0, 1.7, 5);
+        camera.rotation.order = 'YXZ';
+
+        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio > 1 ? 1.5 : 1); // スマホでの画質維持
+        document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        const light = new THREE.PointLight(0xffffff, 1.3, 20); // ライトの範囲を少し広げる
+        scene.add(light);
+
+        const colliders = [], shutters = [];
+        const wallMat = new THREE.MeshLambertMaterial({ color: 0xccbb55 });
+        const floorMat = new THREE.MeshLambertMaterial({ color: 0x8a7c52 });
+        const boxMat = new THREE.MeshLambertMaterial({ color: 0x666666 });
+        const wallGeo = new THREE.BoxGeometry(4, 4, 0.4);
+        const boxGeo = new THREE.BoxGeometry(4.2, 0.6, 0.6); // ボックスを大きくして収納感アップ
+
+        const wallTypes = [
+            { name: 'SHUTTER', color: 0xcccccc, opacity: 1 },
+            { name: 'IRON', color: 0x333333, opacity: 1 },
+            { name: 'GLASS', color: 0x88ccff, opacity: 0.3 }
+        ];
+
+        function createWall(pos, rot, typeIdx) {
+            const t = wallTypes[typeIdx];
+            const m = new THREE.MeshLambertMaterial({ color: t.color, transparent: t.name === 'GLASS', opacity: t.opacity });
+            const w = new THREE.Mesh(wallGeo, m);
+            w.position.copy(pos); w.rotation.y = rot;
+            w.updateMatrixWorld(true);
+            scene.add(w);
+
+            if (t.name === 'SHUTTER') {
+                const box = new THREE.Mesh(boxGeo, boxMat);
+                box.position.set(pos.x, pos.y + 2.0, pos.z); // ボックス位置を最適化
+                box.rotation.y = rot;
+                box.updateMatrixWorld(true);
+                scene.add(box);
+                // ターゲットを3.8mに設定し、完全にボックス内に隠れるように
+                shutters.push({ mesh: w, isOpen: false, targetY: 2, velY: 0, isMoving: false, initialY: pos.y });
+            }
+            colliders.push({ box: new THREE.Box3().setFromObject(w), mesh: w });
+        }
+
+        // --- 無限迷路 (遠くの床も生成) ---
+        const chunkSize = 8, chunks = new Map();
+        function spawnChunk(cx, cz) {
+            const key = `${cx},${cz}`; if (chunks.has(key)) return;
+            const group = new THREE.Group();
+            
+            // 床
+            const f = new THREE.Mesh(new THREE.PlaneGeometry(chunkSize, chunkSize), floorMat);
+            f.rotation.x = -Math.PI/2; group.add(f);
+            
+            // 迷路の壁
+            const seed = Math.abs(Math.sin(cx * 12.9 + cz * 78.2) * 437) % 1;
+            if ((Math.abs(cx) > 1 || Math.abs(cz) > 1) && seed > 0.75) {
+                const w = new THREE.Mesh(new THREE.BoxGeometry(chunkSize, 4, 0.6), wallMat);
+                w.position.set(0, 2, chunkSize/2); group.add(w);
+                w.updateMatrixWorld(true);
+                colliders.push({ box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*chunkSize, 0, cz*chunkSize)) });
+            }
+            group.position.set(cx*chunkSize, 0, cz*chunkSize); scene.add(group); chunks.set(key, group);
+        }
+
+        // --- UI ---
+        let currentType = 0, isBuildMode = false;
+        const ghost = new THREE.Mesh(wallGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 })); ghost.visible = false; scene.add(ghost);
+
+        const buildBtn = document.getElementById('build-btn'), typeBtn = document.getElementById('type-btn'), placeBtn = document.getElementById('place-btn'), actionBtn = document.getElementById('action-btn');
+        buildBtn.onclick = () => { isBuildMode = !isBuildMode; ghost.visible = isBuildMode; typeBtn.style.display = placeBtn.style.display = isBuildMode ? 'block' : 'none'; buildBtn.innerText = isBuildMode ? "EXIT" : "BUILD MODE"; };
+        typeBtn.onclick = () => { currentType = (currentType + 1) % wallTypes.length; typeBtn.innerText = `TYPE: ${wallTypes[currentType].name}`; };
+        placeBtn.onclick = () => { if (ghost.visible) createWall(ghost.position.clone(), ghost.rotation.y, currentType); };
+
+        actionBtn.onclick = () => {
+            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
+            // 判定距離を3m以内に設定
+            const hit = shutters.find(s => ray.ray.distanceToPoint(s.mesh.position) < 3);
+            if (hit && !hit.isMoving) { hit.isOpen = !hit.isOpen; hit.targetY = hit.isOpen ? hit.initialY + 3.8 : hit.initialY; hit.isMoving = true; }
+        };
+
+        // --- 移動・カメラ ---
+        let moveVec = { x: 0, y: 0 }, moveId = null, lookId = null, lastLook = { x: 0, y: 0 };
+        const stick = document.getElementById('stick'), moveZone = document.getElementById('move-zone');
+        window.addEventListener('touchstart', (e) => { for (let t of e.changedTouches) { if (t.clientX < window.innerWidth / 2) moveId = t.identifier; else { lookId = t.identifier; lastLook = { x: t.clientX, y: t.clientY }; } } });
+        window.addEventListener('touchmove', (e) => {
+            for (let t of e.changedTouches) {
+                if (t.identifier === moveId) {
+                    const r = moveZone.getBoundingClientRect(), dx = t.clientX - (r.left + 40), dy = t.clientY - (r.top + 40), d = Math.min(30, Math.sqrt(dx*dx + dy*dy)), a = Math.atan2(dy, dx);
+                    moveVec = { x: (Math.cos(a) * d) / 30, y: (Math.sin(a) * d) / 30 }; stick.style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
+                } else if (t.identifier === lookId) {
+                    camera.rotation.y -= (t.clientX - lastLook.x) * 0.005;
+                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastLook.y) * 0.005));
+                    lastLook = { x: t.clientX, y: t.clientY };
+                }
+            }
+        }, { passive: false });
+        window.addEventListener('touchend', (e) => { for (let t of e.changedTouches) { if (t.identifier === moveId) { moveId = null; moveVec = { x: 0, y: 0 }; stick.style.transform = 'none'; } if (t.identifier === lookId) lookId = null; } });
+
+        function checkCollision(pos) {
+            const pBox = new THREE.Box3().setFromCenterAndSize(pos, new THREE.Vector3(0.6, 1.8, 0.6));
+            return colliders.some(c => pBox.intersectsBox(c.box));
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            // シャッターアニメーション
+            shutters.forEach(s => {
+                if (s.isMoving) {
+                    const dy = (s.targetY - s.mesh.position.y);
+                    s.velY += dy * 0.02; s.velY *= 0.8; s.mesh.position.y += s.velY;
+                    if (Math.abs(dy) < 0.01) { s.mesh.position.y = s.targetY; s.isMoving = false; }
+                }
+            });
+
+            // 移動 (スライディング)
+            if (moveVec.x !== 0 || moveVec.y !== 0) {
+                const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y = 0; f.normalize();
+                const sD = new THREE.Vector3().crossVectors(camera.up, f).negate();
+                const vx = (f.x * -moveVec.y + sD.x * moveVec.x) * 0.1, vz = (f.z * -moveVec.y + sD.z * moveVec.x) * 0.1;
+                const nextX = camera.position.x + vx, nextZ = camera.position.z + vz;
+                const pBox = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(nextX, 1.7, nextZ), new THREE.Vector3(0.6, 1.8, 0.6));
+                let hit = false;
+                for(let c of colliders){ if(pBox.intersectsBox(c.box)) { hit=true; break; } }
+                if(!hit) { camera.position.x = nextX; camera.position.z = nextZ; }
+            }
+            light.position.copy(camera.position);
+
+            // アクションボタン表示
+            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
+            const canAction = shutters.some(s => ray.ray.distanceToPoint(s.mesh.position) < 4);
+            actionBtn.style.display = canAction ? 'block' : 'none';
+
+            if (isBuildMode) {
+                const f = new THREE.Vector3(0,0,-4).applyQuaternion(camera.quaternion);
+                ghost.position.set(Math.round(camera.position.x + f.x), 2, Math.round(camera.position.z + f.z));
+                ghost.rotation.y = Math.round(camera.rotation.y / (Math.PI/2)) * (Math.PI/2);
+                const gB = new THREE.Box3().setFromObject(ghost).expandByScalar(-0.1); ghost.material.color.setHex(colliders.some(c => gB.intersectsBox(c.box)) ? 0xff0000 : 0x00ff00);
+            }
+
+            // チャンク生成範囲を大幅に拡大
+            const cx = Math.round(camera.position.x / chunkSize), cz = Math.round(camera.position.z / chunkSize);
+            for(let x = cx-5; x <= cx+5; x++) for(let z = cz-5; z <= cz+5; z++) spawnChunk(x, z);
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
