@@ -3,24 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms - Restore Lights & Build</title>
+    <title>Backrooms - Full Build & Shutter</title>
     <style>
         body { margin: 0; overflow: hidden; background: #dac05e; touch-action: none; font-family: monospace; }
-        /* UIを最前面に */
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; }
         .controls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
-        /* ボタンを確実にクリック可能に */
-        .btn { pointer-events: auto; padding: 15px; background: rgba(0,0,0,0.85); color: white; border: 2px solid #fff; border-radius: 8px; font-weight: bold; margin-top: 10px; min-width: 130px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+        .btn { pointer-events: auto; padding: 12px; background: rgba(0,0,0,0.85); color: white; border: 2px solid #fff; border-radius: 8px; font-weight: bold; margin-top: 8px; min-width: 140px; cursor: pointer; }
         #move-zone { position: absolute; bottom: 40px; left: 40px; width: 100px; height: 100px; background: rgba(255,255,255,0.2); border-radius: 50%; border: 2px solid rgba(0,0,0,0.3); z-index: 5000; pointer-events: auto; }
         #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: rgba(0,0,0,0.6); border-radius: 50%; pointer-events: none; }
     </style>
 </head>
 <body>
     <div id="move-zone"><div id="stick"></div></div>
-    
     <div id="ui-layer">
         <div class="controls">
-            <button id="place-btn" class="btn" style="display:none; background: #28a745;">PLACE (Wall)</button>
+            <button id="action-btn" class="btn" style="display:none; background: #ff4757;">OPEN/CLOSE</button>
+            <button id="place-btn" class="btn" style="display:none; background: #28a745;">PLACE</button>
+            <button id="type-btn" class="btn" style="display:none; background: #007bff;">TYPE: SHUTTER</button>
             <button id="build-btn" class="btn" style="background: #e6b400; color: #000;">B - BUILD MODE</button>
         </div>
     </div>
@@ -44,97 +43,122 @@
         document.body.appendChild(renderer.domElement);
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-        const mainLight = new THREE.PointLight(0xffffee, 1.0, 15);
+        const mainLight = new THREE.PointLight(0xffffee, 1.2, 18);
         scene.add(mainLight);
 
-        // 素材
-        const wallMat = new THREE.MeshLambertMaterial({ color: 0xccbb55 });
-        const floorMat = new THREE.MeshLambertMaterial({ color: 0x8a7c52 });
-        const ceilMat = new THREE.MeshLambertMaterial({ color: 0xdac05e });
-        const lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff }); // 蛍光灯用
-        const ghostMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 });
+        // 壁タイプ定義
+        const wallTypes = [
+            { name: 'SHUTTER', color: 0xcccccc, opacity: 1, isShutter: true },
+            { name: 'GLASS', color: 0x88ccff, opacity: 0.4, isGlass: true },
+            { name: 'IRON', color: 0x333333, opacity: 1 },
+            { name: 'WALL', color: 0xccbb55, opacity: 1 }
+        ];
+        let currentTypeIdx = 0;
 
-        const chunks = new Map(), colliders = [];
         const wallGeo = new THREE.BoxGeometry(4, 4, 0.4);
-        let isBuildMode = false;
-
-        // 建築プレビュー（ゴースト）
+        const colliders = [], shutters = [], chunks = new Map();
+        const ghostMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 });
         const ghost = new THREE.Mesh(wallGeo, ghostMat);
-        ghost.visible = false;
-        scene.add(ghost);
+        ghost.visible = false; scene.add(ghost);
+
+        function createObject(pos, rot, typeIdx) {
+            const t = wallTypes[typeIdx];
+            const mat = new THREE.MeshLambertMaterial({ 
+                color: t.color, 
+                transparent: t.opacity < 1, 
+                opacity: t.opacity 
+            });
+            const mesh = new THREE.Mesh(wallGeo, mat);
+            mesh.position.copy(pos);
+            mesh.rotation.y = rot;
+            scene.add(mesh);
+
+            if (t.isShutter) {
+                // シャッターケース
+                const caseGeo = new THREE.BoxGeometry(4.2, 0.6, 0.6);
+                const caseMesh = new THREE.Mesh(caseGeo, new THREE.MeshLambertMaterial({color: 0x444444}));
+                caseMesh.position.set(pos.x, pos.y + 2.1, pos.z);
+                caseMesh.rotation.y = rot;
+                scene.add(caseMesh);
+                shutters.push({ mesh, isOpen: false, targetY: pos.y, initialY: pos.y, isMoving: false });
+            }
+            colliders.push({ box: new THREE.Box3().setFromObject(mesh), mesh });
+        }
 
         function spawnChunk(cx, cz) {
             const key = `${cx},${cz}`; if (chunks.has(key)) return;
             const g = new THREE.Group();
-            // 床・天井
-            const f = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), floorMat); f.rotation.x = -Math.PI/2; g.add(f);
-            const c = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), ceilMat); c.rotation.x = Math.PI/2; c.position.y = 4; g.add(c);
+            const f = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.MeshLambertMaterial({color: 0x8a7c52}));
+            f.rotation.x = -Math.PI/2; g.add(f);
+            const c = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.MeshLambertMaterial({color: 0xdac05e}));
+            c.rotation.x = Math.PI/2; c.position.y = 4; g.add(c);
+            const l = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 2.5), new THREE.MeshBasicMaterial({color: 0xffffff}));
+            l.position.set(0, 3.98, 0); g.add(l);
             
-            // 蛍光灯を復元
-            const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 2.5), lampMat);
-            lamp.position.set(0, 3.98, 0);
-            g.add(lamp);
-
-            // 自動生成の壁
-            if (Math.abs(Math.sin(cx*12.9 + cz*78.2)) > 0.85) {
-                const w = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 0.5), wallMat);
+            if (Math.abs(Math.sin(cx*12.9 + cz*78.2)) > 0.88) {
+                const w = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 0.5), new THREE.MeshLambertMaterial({color: 0xccbb55}));
                 w.position.set(0, 2, 4); g.add(w);
                 colliders.push({ box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*8, 0, cz*8)) });
             }
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(key, g);
         }
 
-        // --- UIイベント処理 ---
-        const buildBtn = document.getElementById('build-btn');
-        const placeBtn = document.getElementById('place-btn');
+        // --- UI & Controls ---
+        const buildBtn = document.getElementById('build-btn'), placeBtn = document.getElementById('place-btn'), 
+              typeBtn = document.getElementById('type-btn'), actionBtn = document.getElementById('action-btn');
+        let isBuildMode = false;
 
-        buildBtn.addEventListener('pointerdown', (e) => {
-            e.stopPropagation(); // 移動にイベントを吸わせない
-            isBuildMode = !isBuildMode;
+        buildBtn.onclick = (e) => {
+            e.stopPropagation(); isBuildMode = !isBuildMode;
             ghost.visible = isBuildMode;
-            placeBtn.style.display = isBuildMode ? 'block' : 'none';
-            buildBtn.style.background = isBuildMode ? "#ffeb3b" : "#e6b400";
+            placeBtn.style.display = typeBtn.style.display = isBuildMode ? 'block' : 'none';
             buildBtn.innerText = isBuildMode ? "EXIT BUILD" : "B - BUILD MODE";
-        });
+        };
 
-        placeBtn.addEventListener('pointerdown', (e) => {
+        typeBtn.onclick = (e) => {
             e.stopPropagation();
-            if(!isBuildMode) return;
-            const newWall = new THREE.Mesh(wallGeo, wallMat.clone());
-            newWall.position.copy(ghost.position);
-            newWall.rotation.copy(ghost.rotation);
-            scene.add(newWall);
-            colliders.push({ box: new THREE.Box3().setFromObject(newWall) });
-        });
+            currentTypeIdx = (currentTypeIdx + 1) % wallTypes.length;
+            typeBtn.innerText = `TYPE: ${wallTypes[currentTypeIdx].name}`;
+        };
 
-        // --- 移動・視点管理 ---
+        placeBtn.onclick = (e) => {
+            e.stopPropagation(); if(isBuildMode) createObject(ghost.position.clone(), ghost.rotation.y, currentTypeIdx);
+        };
+
+        actionBtn.onclick = (e) => {
+            e.stopPropagation();
+            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
+            const hit = shutters.find(s => ray.ray.distanceToPoint(s.mesh.position) < 3);
+            if (hit && !hit.isMoving) {
+                hit.isOpen = !hit.isOpen;
+                hit.targetY = hit.isOpen ? hit.initialY + 3.8 : hit.initialY;
+                hit.isMoving = true;
+            }
+        };
+
+        // --- Movement Logic ---
         let moveVec = { x: 0, z: 0 }, moveTouchId = null, lookTouchId = null, lastLookPos = { x: 0, y: 0 };
         const moveZone = document.getElementById('move-zone');
 
-        window.addEventListener('touchstart', (e) => {
-            for (let t of e.changedTouches) {
-                if (t.target.closest('.btn') || t.target === moveZone) continue;
-                if (t.clientX > window.innerWidth / 2 && lookTouchId === null) {
-                    lookTouchId = t.identifier; lastLookPos = { x: t.clientX, y: t.clientY };
-                }
-            }
-        });
-
-        moveZone.addEventListener('touchstart', (e) => {
-            moveTouchId = e.targetTouches[0].identifier;
-        });
-
+        moveZone.addEventListener('touchstart', (e) => { moveTouchId = e.targetTouches[0].identifier; });
         moveZone.addEventListener('touchmove', (e) => {
             e.preventDefault();
             const t = Array.from(e.touches).find(v => v.identifier === moveTouchId);
             if (t) {
                 const r = moveZone.getBoundingClientRect(), dx = t.clientX - (r.left + 50), dy = t.clientY - (r.top + 50);
-                const d = Math.min(40, Math.sqrt(dx*dx + dy*dy)), a = Math.atan2(dy, dx);
-                moveVec = { x: Math.cos(a) * (d / 40), z: Math.sin(a) * (d / 40) };
+                const d = Math.min(40, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy, dx);
+                moveVec = { x: Math.cos(a)*(d/40), z: Math.sin(a)*(d/40) };
                 document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
             }
         }, { passive: false });
 
+        window.addEventListener('touchstart', (e) => {
+            for (let t of e.changedTouches) {
+                if (t.clientX > window.innerWidth / 2 && lookTouchId === null) {
+                    lookTouchId = t.identifier; lastLookPos = { x: t.clientX, y: t.clientY };
+                }
+            }
+        });
         window.addEventListener('touchmove', (e) => {
             for (let t of e.changedTouches) {
                 if (t.identifier === lookTouchId) {
@@ -144,7 +168,6 @@
                 }
             }
         });
-
         window.addEventListener('touchend', (e) => {
             for (let t of e.changedTouches) {
                 if (t.identifier === moveTouchId) { moveTouchId = null; moveVec = { x: 0, z: 0 }; document.getElementById('stick').style.transform = 'none'; }
@@ -154,6 +177,7 @@
 
         function animate() {
             requestAnimationFrame(animate);
+            // 移動
             if (moveVec.x !== 0 || moveVec.z !== 0) {
                 const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y = 0; f.normalize();
                 const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
@@ -163,11 +187,23 @@
                     camera.position.copy(nextPos);
                 }
             }
+            // シャッターアニメ
+            shutters.forEach(s => {
+                if(s.isMoving) {
+                    s.mesh.position.y += (s.targetY - s.mesh.position.y) * 0.1;
+                    if(Math.abs(s.targetY - s.mesh.position.y) < 0.01) { s.mesh.position.y = s.targetY; s.isMoving = false; }
+                }
+            });
+            // プレビュー表示
             if (isBuildMode) {
                 const f = new THREE.Vector3(0,0,-4).applyQuaternion(camera.quaternion);
                 ghost.position.set(Math.round(camera.position.x + f.x), 2, Math.round(camera.position.z + f.z));
                 ghost.rotation.y = Math.round(camera.rotation.y / (Math.PI/2)) * (Math.PI/2);
             }
+            // アクションボタン表示判定
+            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
+            actionBtn.style.display = shutters.some(s => ray.ray.distanceToPoint(s.mesh.position) < 3) ? 'block' : 'none';
+
             mainLight.position.copy(camera.position);
             const cx = Math.round(camera.position.x / 8), cz = Math.round(camera.position.z / 8);
             for(let i=cx-4; i<=cx+4; i++) for(let j=cz-4; j<=cz+4; j++) spawnChunk(i, j);
