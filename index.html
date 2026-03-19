@@ -3,26 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms - Build Mode Fixed</title>
+    <title>Backrooms - Precise Control</title>
     <style>
         body { margin: 0; overflow: hidden; background: #dac05e; touch-action: none; font-family: monospace; }
-        /* UIレイヤーを最前面に */
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000; }
         .controls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
-        .btn { pointer-events: auto; padding: 12px; background: rgba(0,0,0,0.8); color: white; border: 2px solid #fff; border-radius: 8px; font-weight: bold; margin-top: 8px; min-width: 120px; cursor: pointer; }
+        .btn { pointer-events: auto; padding: 12px; background: rgba(0,0,0,0.8); color: white; border: 2px solid #fff; border-radius: 8px; font-weight: bold; margin-top: 8px; min-width: 120px; }
         #move-zone { position: absolute; bottom: 40px; left: 40px; width: 100px; height: 100px; background: rgba(255,255,255,0.2); border-radius: 50%; border: 2px solid rgba(0,0,0,0.3); z-index: 500; pointer-events: auto; }
-        #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: rgba(0,0,0,0.5); border-radius: 50%; pointer-events: none; }
+        #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: rgba(0,0,0,0.6); border-radius: 50%; pointer-events: none; transition: transform 0.1s ease-out; }
     </style>
 </head>
 <body>
     <div id="move-zone"><div id="stick"></div></div>
-    
     <div id="ui-layer">
         <div class="controls">
-            <button id="action-btn" class="btn" style="display:none; background: #ff4757;">E - ACTION</button>
-            <button id="place-btn" class="btn" style="display:none; background: #28a745;">PLACE (Space)</button>
-            <button id="type-btn" class="btn" style="display:none; background: #007bff;">TYPE: SHUTTER</button>
-            <button id="build-btn" class="btn" style="background: #e6b400; color: #000;">B - BUILD MODE</button>
+            <button id="place-btn" class="btn" style="display:none; background: #28a745;">PLACE</button>
+            <button id="build-btn" class="btn" style="background: #e6b400; color: #000;">B - BUILD</button>
         </div>
     </div>
 
@@ -51,31 +47,13 @@
         const wallMat = new THREE.MeshLambertMaterial({ color: 0xccbb55 });
         const floorMat = new THREE.MeshLambertMaterial({ color: 0x8a7c52 });
         const ceilMat = new THREE.MeshLambertMaterial({ color: 0xdac05e });
-        const lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        const wallGeo = new THREE.BoxGeometry(4, 4, 0.4);
-
-        const chunks = new Map(), colliders = [], shutters = [];
-        const wallTypes = [{ name: 'SHUTTER', color: 0xcccccc }, { name: 'IRON', color: 0x333333 }, { name: 'GLASS', color: 0x88ccff, opacity: 0.4 }];
-        let currentType = 0, isBuildMode = false;
-
-        function createWall(pos, rot, typeIdx) {
-            const t = wallTypes[typeIdx];
-            const m = new THREE.MeshLambertMaterial({ color: t.color, transparent: !!t.opacity, opacity: t.opacity || 1 });
-            const w = new THREE.Mesh(wallGeo, m);
-            w.position.copy(pos); w.rotation.y = rot;
-            scene.add(w);
-            if (t.name === 'SHUTTER') {
-                shutters.push({ mesh: w, isOpen: false, targetY: pos.y, initialY: pos.y, isMoving: false });
-            }
-            colliders.push({ box: new THREE.Box3().setFromObject(w), mesh: w });
-        }
+        const chunks = new Map(), colliders = [];
 
         function spawnChunk(cx, cz) {
             const key = `${cx},${cz}`; if (chunks.has(key)) return;
             const g = new THREE.Group();
             const f = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), floorMat); f.rotation.x = -Math.PI/2; g.add(f);
             const c = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), ceilMat); c.rotation.x = Math.PI/2; c.position.y = 4; g.add(c);
-            const l = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.01, 2), lampMat); l.position.set(0, 3.99, 0); g.add(l);
             if (Math.abs(Math.sin(cx*12.9 + cz*78.2)) > 0.85) {
                 const w = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 0.5), wallMat); w.position.set(0, 2, 4); g.add(w);
                 colliders.push({ box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*8, 0, cz*8)) });
@@ -83,108 +61,91 @@
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(key, g);
         }
 
-        // --- UIシステム ---
-        const buildBtn = document.getElementById('build-btn'), placeBtn = document.getElementById('place-btn'), typeBtn = document.getElementById('type-btn'), actionBtn = document.getElementById('action-btn');
-        const ghost = new THREE.Mesh(wallGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 })); 
-        ghost.visible = false; scene.add(ghost);
+        // --- 移動制御（デッドゾーン導入） ---
+        let moveVec = { x: 0, z: 0 };
+        let moveTouchId = null, lookTouchId = null, lastLookPos = { x: 0, y: 0 };
+        const DEADZONE = 0.15; // 15%以下の小さな動きは無視する
 
-        function toggleBuild() {
-            isBuildMode = !isBuildMode;
-            ghost.visible = isBuildMode;
-            placeBtn.style.display = typeBtn.style.display = isBuildMode ? 'block' : 'none';
-            buildBtn.style.background = isBuildMode ? "#ffeb3b" : "#e6b400";
+        const moveZone = document.getElementById('move-zone');
+        const stick = document.getElementById('stick');
+
+        function updateJoystick(tx, ty) {
+            const r = moveZone.getBoundingClientRect();
+            const centerX = r.left + r.width / 2;
+            const centerY = r.top + r.height / 2;
+            const dx = tx - centerX;
+            const dy = ty - centerY;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const maxDist = r.width / 2;
+            
+            const normalizedDist = Math.min(1, dist / maxDist);
+            const angle = Math.atan2(dy, dx);
+
+            if (normalizedDist < DEADZONE) {
+                moveVec = { x: 0, z: 0 };
+            } else {
+                // デッドゾーンを引いてから再計算することで滑らかに開始
+                const power = (normalizedDist - DEADZONE) / (1 - DEADZONE);
+                moveVec = { x: Math.cos(angle) * power, z: Math.sin(angle) * power };
+            }
+            
+            const visualDist = Math.min(maxDist - 10, dist);
+            stick.style.transform = `translate(${Math.cos(angle) * visualDist}px, ${Math.sin(angle) * visualDist}px)`;
         }
-
-        buildBtn.onclick = (e) => { e.stopPropagation(); toggleBuild(); };
-        placeBtn.onclick = (e) => { e.stopPropagation(); if(isBuildMode) createWall(ghost.position.clone(), ghost.rotation.y, currentType); };
-        typeBtn.onclick = (e) => { e.stopPropagation(); currentType = (currentType + 1) % wallTypes.length; typeBtn.innerText = `TYPE: ${wallTypes[currentType].name}`; };
-        actionBtn.onclick = (e) => { e.stopPropagation(); triggerAction(); };
-
-        function triggerAction() {
-            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
-            const hit = shutters.find(s => ray.ray.distanceToPoint(s.mesh.position) < 3);
-            if (hit && !hit.isMoving) { hit.isOpen = !hit.isOpen; hit.targetY = hit.isOpen ? hit.initialY + 3.6 : hit.initialY; hit.isMoving = true; }
-        }
-
-        // --- 入力システム ---
-        let keys = {}, moveVec = { x: 0, z: 0 }, moveTouchId = null, lookTouchId = null, lastLookPos = { x: 0, y: 0 };
-        window.addEventListener('keydown', e => {
-            keys[e.code] = true;
-            if(e.code === 'KeyB') toggleBuild();
-            if(e.code === 'Space' && isBuildMode) placeBtn.click();
-            if(e.code === 'KeyT') typeBtn.click();
-            if(e.code === 'KeyE') triggerAction();
-        });
-        window.addEventListener('keyup', e => keys[e.code] = false);
 
         window.addEventListener('touchstart', (e) => {
             for (let t of e.changedTouches) {
-                if (t.target.classList.contains('btn') || t.target.id === 'move-zone') continue; // UIを触っている時は無視
-                if (t.clientX < window.innerWidth / 2 && moveTouchId === null) moveTouchId = t.identifier;
-                else if (lookTouchId === null) { lookTouchId = t.identifier; lastLookPos = { x: t.clientX, y: t.clientY }; }
-            }
-        });
-
-        const moveZone = document.getElementById('move-zone');
-        moveZone.addEventListener('touchmove', (e) => {
-            e.preventDefault();
-            const t = Array.from(e.touches).find(v => v.target === moveZone);
-            if (t) {
-                const r = moveZone.getBoundingClientRect(), dx = t.clientX - (r.left + 50), dy = t.clientY - (r.top + 50);
-                const d = Math.min(40, Math.sqrt(dx*dx + dy*dy)), a = Math.atan2(dy, dx);
-                moveVec = { x: Math.cos(a) * (d / 40), z: Math.sin(a) * (d / 40) };
-                document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
+                if (t.target === moveZone) {
+                    moveTouchId = t.identifier;
+                    updateJoystick(t.clientX, t.clientY);
+                } else if (t.clientX > window.innerWidth / 2) {
+                    lookTouchId = t.identifier;
+                    lastLookPos = { x: t.clientX, y: t.clientY };
+                }
             }
         }, { passive: false });
 
         window.addEventListener('touchmove', (e) => {
+            e.preventDefault();
             for (let t of e.changedTouches) {
-                if (t.identifier === lookTouchId) {
-                    camera.rotation.y -= (t.clientX - lastLookPos.x) * 0.006;
-                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastLookPos.y) * 0.006));
+                if (t.identifier === moveTouchId) {
+                    updateJoystick(t.clientX, t.clientY);
+                } else if (t.identifier === lookTouchId) {
+                    const dx = t.clientX - lastLookPos.x;
+                    const dy = t.clientY - lastLookPos.y;
+                    camera.rotation.y -= dx * 0.005;
+                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - dy * 0.005));
                     lastLookPos = { x: t.clientX, y: t.clientY };
+                }
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchend', (e) => {
+            for (let t of e.changedTouches) {
+                if (t.identifier === moveTouchId) {
+                    moveTouchId = null;
+                    moveVec = { x: 0, z: 0 }; // 離した瞬間に確実にリセット
+                    stick.style.transform = `translate(0px, 0px)`;
+                } else if (t.identifier === lookTouchId) {
+                    lookTouchId = null;
                 }
             }
         });
 
-        window.addEventListener('touchend', (e) => {
-            for (let t of e.changedTouches) {
-                if (t.identifier === moveTouchId) { moveTouchId = null; moveVec = { x: 0, z: 0 }; document.getElementById('stick').style.transform = `translate(0px, 0px)`; }
-                if (t.identifier === lookTouchId) lookTouchId = null;
-            }
-        });
-
-        renderer.domElement.onclick = () => renderer.domElement.requestPointerLock();
-        window.addEventListener('mousemove', e => { if (document.pointerLockElement) { camera.rotation.y -= e.movementX * 0.003; camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY * 0.003)); } });
-
         function animate() {
             requestAnimationFrame(animate);
-            let vx = 0, vz = 0;
-            if (keys['KeyW']) vz = -1; if (keys['KeyS']) vz = 1;
-            if (keys['KeyA']) vx = -1; if (keys['KeyD']) vx = 1;
-            if (moveVec.x !== 0 || moveVec.z !== 0) { vx = moveVec.x; vz = moveVec.z; }
-
-            if (vx !== 0 || vz !== 0) {
+            if (moveVec.x !== 0 || moveVec.z !== 0) {
                 const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y = 0; f.normalize();
                 const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
-                const vel = new THREE.Vector3().addScaledVector(f, -vz).addScaledVector(r, vx).setLength(0.12);
+                const vel = new THREE.Vector3().addScaledVector(f, -moveVec.z).addScaledVector(r, moveVec.x).setLength(0.12);
                 const nextPos = camera.position.clone().add(vel);
                 if (!colliders.some(c => new THREE.Box3().setFromCenterAndSize(nextPos, new THREE.Vector3(0.6, 1.8, 0.6)).intersectsBox(c.box))) {
                     camera.position.copy(nextPos);
                 }
             }
-
-            shutters.forEach(s => { if(s.isMoving) { s.mesh.position.y += (s.targetY - s.mesh.position.y) * 0.1; if(Math.abs(s.targetY - s.mesh.position.y) < 0.01) s.isMoving = false; } });
-            if (isBuildMode) {
-                const f = new THREE.Vector3(0,0,-4).applyQuaternion(camera.quaternion);
-                ghost.position.set(Math.round(camera.position.x + f.x), 2, Math.round(camera.position.z + f.z));
-                ghost.rotation.y = Math.round(camera.rotation.y / (Math.PI/2)) * (Math.PI/2);
-            }
             mainLight.position.copy(camera.position);
             const cx = Math.round(camera.position.x / 8), cz = Math.round(camera.position.z / 8);
             for(let i=cx-4; i<=cx+4; i++) for(let j=cz-4; j<=cz+4; j++) spawnChunk(i, j);
-            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
-            actionBtn.style.display = shutters.some(s => ray.ray.distanceToPoint(s.mesh.position) < 3) ? 'block' : 'none';
             renderer.render(scene, camera);
         }
         animate();
