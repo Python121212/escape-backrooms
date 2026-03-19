@@ -3,26 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms - PC & Mobile Hybrid</title>
+    <title>Backrooms - Ultralight & Ceiling</title>
     <style>
         body { margin: 0; overflow: hidden; background: #dac05e; touch-action: none; font-family: monospace; }
         #ui-container { position: absolute; width: 100%; height: 100%; pointer-events: none; z-index: 100; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-end; padding: 20px; box-sizing: border-box; }
-        .btn { pointer-events: auto; padding: 15px; background: rgba(0,0,0,0.85); color: white; border: 2px solid #fff; border-radius: 8px; font-size: 14px; margin-bottom: 10px; min-width: 160px; font-weight: bold; text-align: center; }
-        #build-btn { background: #e6b400; color: #000; }
-        #action-btn { background: #ff4757; display: none; min-height: 60px; font-size: 18px; }
-        #move-zone { position: absolute; bottom: 30px; left: 30px; width: 80px; height: 80px; background: rgba(255,255,255,0.1); border-radius: 50%; border: 1px solid rgba(0,0,0,0.2); pointer-events: auto; }
+        .btn { pointer-events: auto; padding: 12px; background: rgba(0,0,0,0.8); color: white; border: 2px solid #fff; border-radius: 6px; font-size: 14px; margin-bottom: 8px; min-width: 140px; font-weight: bold; }
+        #move-zone { position: absolute; bottom: 30px; left: 30px; width: 80px; height: 80px; background: rgba(255,255,255,0.1); border-radius: 50%; }
         #stick { position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; margin: -15px; background: rgba(0,0,0,0.4); border-radius: 50%; }
-        #pc-hint { position: absolute; top: 10px; left: 10px; color: #555; font-size: 12px; pointer-events: none; background: rgba(255,255,255,0.5); padding: 5px; border-radius: 4px; }
     </style>
 </head>
 <body>
-    <div id="pc-hint">PC: WASD移動 / Mouse視点 / Eキーで操作</div>
     <div id="move-zone"><div id="stick"></div></div>
     <div id="ui-container">
-        <button id="action-btn" class="btn">E - OPEN/CLOSE</button>
-        <button id="place-btn" class="btn" style="display:none; background: #28a745;">PLACE (Space)</button>
-        <button id="type-btn" class="btn" style="display:none; background: #007bff;">TYPE: SHUTTER</button>
-        <button id="build-btn" class="btn">B - BUILD MODE</button>
+        <button id="action-btn" class="btn" style="display:none; background: #ff4757;">E - ACTION</button>
+        <button id="build-btn" class="btn" style="background: #e6b400; color: #000;">B - BUILD</button>
     </div>
 
     <script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
@@ -31,150 +25,145 @@
         import * as THREE from 'three';
 
         const scene = new THREE.Scene();
-        const bgColor = 0xdac05e;
-        scene.background = new THREE.Color(bgColor);
-        scene.fog = new THREE.Fog(bgColor, 1, 80);
+        scene.background = new THREE.Color(0xdac05e);
+        scene.fog = new THREE.Fog(0xdac05e, 1, 50);
 
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
         camera.position.set(0, 1.7, 5);
         camera.rotation.order = 'YXZ';
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setPixelRatio(1); // 軽量化のため1固定
         document.body.appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-        const light = new THREE.PointLight(0xffffff, 1.5, 30);
-        scene.add(light);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-        const colliders = [], shutters = [];
         const wallMat = new THREE.MeshLambertMaterial({ color: 0xccbb55 });
         const floorMat = new THREE.MeshLambertMaterial({ color: 0x8a7c52 });
-        const boxMat = new THREE.MeshLambertMaterial({ color: 0x444444 });
-        const wallGeo = new THREE.BoxGeometry(4, 4, 0.4);
-        const boxGeo = new THREE.BoxGeometry(4.2, 0.8, 0.8);
+        const ceilingMat = new THREE.MeshLambertMaterial({ color: 0xdac05e });
+        const lightMat = new THREE.MeshBasicMaterial({ color: 0xffffee });
 
-        const wallTypes = [{ name: 'SHUTTER', color: 0xcccccc }, { name: 'IRON', color: 0x333333 }, { name: 'GLASS', color: 0x88ccff, opacity: 0.4 }];
+        const chunks = new Map();
+        const chunkSize = 8;
+        const colliders = [];
 
-        function createWall(pos, rot, typeIdx) {
-            const t = wallTypes[typeIdx];
-            const m = new THREE.MeshLambertMaterial({ color: t.color, transparent: !!t.opacity, opacity: t.opacity || 1 });
-            const w = new THREE.Mesh(wallGeo, m);
-            w.position.copy(pos); w.rotation.y = rot;
-            scene.add(w);
-
-            if (t.name === 'SHUTTER') {
-                const box = new THREE.Mesh(boxGeo, boxMat);
-                box.position.set(pos.x, pos.y + 2.1, pos.z); box.rotation.y = rot;
-                scene.add(box);
-                shutters.push({ mesh: w, isOpen: false, targetY: pos.y, velY: 0, isMoving: false, initialY: pos.y });
-            }
-            colliders.push({ box: new THREE.Box3().setFromObject(w), mesh: w });
-        }
-
-        const chunkSize = 8, chunks = new Map();
         function spawnChunk(cx, cz) {
-            const key = `${cx},${cz}`; if (chunks.has(key)) return;
+            const key = `${cx},${cz}`;
+            if (chunks.has(key)) return;
+
             const group = new THREE.Group();
-            const f = new THREE.Mesh(new THREE.PlaneGeometry(chunkSize, chunkSize), floorMat);
-            f.rotation.x = -Math.PI/2; group.add(f);
             
+            // 床
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(chunkSize, chunkSize), floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            group.add(floor);
+
+            // 天井
+            const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(chunkSize, chunkSize), ceilingMat);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = 4;
+            group.add(ceiling);
+
+            // 蛍光灯 (天井に埋め込み)
+            const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 3), lightMat);
+            lamp.position.set(0, 3.98, 0);
+            group.add(lamp);
+            
+            // ポイントライト (負荷軽減のため各チャンクに1つのみ)
+            const pLight = new THREE.PointLight(0xffffee, 0.8, 12);
+            pLight.position.set(0, 3.5, 0);
+            group.add(pLight);
+
+            // ランダムな壁
             const seed = Math.abs(Math.sin(cx * 12.9 + cz * 78.2) * 437) % 1;
-            if ((Math.abs(cx) > 2 || Math.abs(cz) > 2) && seed > 0.8) {
-                const w = new THREE.Mesh(new THREE.BoxGeometry(chunkSize, 4, 0.6), wallMat);
-                w.position.set(0, 2, chunkSize/2); group.add(w);
-                colliders.push({ box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*chunkSize, 0, cz*chunkSize)) });
+            if (seed > 0.7) {
+                const w = new THREE.Mesh(new THREE.BoxGeometry(chunkSize, 4, 0.5), wallMat);
+                w.position.set(0, 2, chunkSize/2);
+                group.add(w);
+                const box = new THREE.Box3().setFromObject(w);
+                box.translate(new THREE.Vector3(cx * chunkSize, 0, cz * chunkSize));
+                colliders.push({ box, id: key });
             }
-            group.position.set(cx*chunkSize, 0, cz*chunkSize); scene.add(group); chunks.set(key, group);
+
+            group.position.set(cx * chunkSize, 0, cz * chunkSize);
+            scene.add(group);
+            chunks.set(key, { group, time: Date.now() });
         }
 
-        // --- 入力制御 (PC & Mobile) ---
-        let keys = {}, isBuildMode = false, currentType = 0;
-        window.addEventListener('keydown', (e) => { 
-            keys[e.code] = true; 
-            if(e.code === 'KeyE') triggerAction();
-            if(e.code === 'KeyB') toggleBuildMode();
-            if(e.code === 'Space' && isBuildMode) placeObject();
-        });
-        window.addEventListener('keyup', (e) => keys[e.code] = false);
-        window.addEventListener('mousemove', (e) => {
-            if (document.pointerLockElement) {
-                camera.rotation.y -= e.movementX * 0.002;
-                camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY * 0.002));
-            }
-        });
-        renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
+        // --- 軽量化ロジック (遠くのチャンクを削除) ---
+        function updateChunks() {
+            const cx = Math.round(camera.position.x / chunkSize);
+            const cz = Math.round(camera.position.z / chunkSize);
+            const keepRadius = 4;
 
-        // --- UIアクション ---
-        const buildBtn = document.getElementById('build-btn'), actionBtn = document.getElementById('action-btn'), placeBtn = document.getElementById('place-btn'), typeBtn = document.getElementById('type-btn');
-        function toggleBuildMode() { isBuildMode = !isBuildMode; ghost.visible = isBuildMode; typeBtn.style.display = placeBtn.style.display = isBuildMode ? 'block' : 'none'; }
-        function placeObject() { if (ghost.visible && ghost.material.color.getHex() === 0x00ff00) createWall(ghost.position.clone(), ghost.rotation.y, currentType); }
-        function triggerAction() {
-            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
-            const hit = shutters.find(s => ray.ray.distanceToPoint(s.mesh.position) < 3);
-            if (hit && !hit.isMoving) { hit.isOpen = !hit.isOpen; hit.targetY = hit.isOpen ? hit.initialY + 3.6 : hit.initialY; hit.isMoving = true; }
-        }
-        buildBtn.onclick = toggleBuildMode; placeBtn.onclick = placeObject; actionBtn.onclick = triggerAction;
-        typeBtn.onclick = () => { currentType = (currentType + 1) % wallTypes.length; typeBtn.innerText = `TYPE: ${wallTypes[currentType].name}`; };
-
-        // --- Mobile Touch ---
-        let moveVec = { x: 0, y: 0 }, moveId = null, lookId = null, lastLook = { x: 0, y: 0 };
-        const stick = document.getElementById('stick'), moveZone = document.getElementById('move-zone');
-        window.addEventListener('touchstart', (e) => { for (let t of e.changedTouches) { if (t.clientX < window.innerWidth / 2) moveId = t.identifier; else { lookId = t.identifier; lastLook = { x: t.clientX, y: t.clientY }; } } });
-        window.addEventListener('touchmove', (e) => {
-            for (let t of e.changedTouches) {
-                if (t.identifier === moveId) {
-                    const r = moveZone.getBoundingClientRect(), dx = t.clientX - (r.left + 40), dy = t.clientY - (r.top + 40), d = Math.min(30, Math.sqrt(dx*dx + dy*dy)), a = Math.atan2(dy, dx);
-                    moveVec = { x: (Math.cos(a) * d) / 30, y: (Math.sin(a) * d) / 30 }; stick.style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
-                } else if (t.identifier === lookId && !document.pointerLockElement) {
-                    camera.rotation.y -= (t.clientX - lastLook.x) * 0.005;
-                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastLook.y) * 0.005));
-                    lastLook = { x: t.clientX, y: t.clientY };
+            for (let x = cx - keepRadius; x <= cx + keepRadius; x++) {
+                for (let z = cz - keepRadius; z <= cz + keepRadius; z++) {
+                    spawnChunk(x, z);
                 }
             }
-        });
-        window.addEventListener('touchend', (e) => { for (let t of e.changedTouches) { if (t.identifier === moveId) { moveId = null; moveVec = { x: 0, y: 0 }; stick.style.transform = 'none'; } if (t.identifier === lookId) lookId = null; } });
 
-        const ghost = new THREE.Mesh(wallGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 })); scene.add(ghost);
+            // 古いチャンクのクリーンアップ
+            if (chunks.size > 100) {
+                for (const [key, data] of chunks) {
+                    const [kx, kz] = key.split(',').map(Number);
+                    if (Math.abs(kx - cx) > keepRadius + 1 || Math.abs(kz - cz) > keepRadius + 1) {
+                        scene.remove(data.group);
+                        chunks.delete(key);
+                        const idx = colliders.findIndex(c => c.id === key);
+                        if (idx > -1) colliders.splice(idx, 1);
+                    }
+                }
+            }
+        }
+
+        // --- 入力系 (PC & Mobile) ---
+        let keys = {};
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        let moveVec = { x: 0, y: 0 };
+        const stick = document.getElementById('stick');
+        window.addEventListener('touchmove', e => {
+            const t = e.touches[0];
+            const r = document.getElementById('move-zone').getBoundingClientRect();
+            const dx = t.clientX - (r.left + 40), dy = t.clientY - (r.top + 40);
+            const d = Math.min(30, Math.sqrt(dx*dx + dy*dy));
+            const a = Math.atan2(dy, dx);
+            moveVec = { x: (Math.cos(a) * d) / 30, y: (Math.sin(a) * d) / 30 };
+            stick.style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
+        });
+        window.addEventListener('touchend', () => { moveVec = { x: 0, y: 0 }; stick.style.transform = 'none'; });
+
+        // マウス視点移動
+        window.addEventListener('mousemove', e => {
+            if (document.pointerLockElement) {
+                camera.rotation.y -= e.movementX * 0.003;
+                camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY * 0.003));
+            }
+        });
+        renderer.domElement.onclick = () => renderer.domElement.requestPointerLock();
 
         function animate() {
             requestAnimationFrame(animate);
-            // シャッターアニメ
-            shutters.forEach(s => {
-                if (s.isMoving) {
-                    s.mesh.position.y += (s.targetY - s.mesh.position.y) * 0.1;
-                    if (Math.abs(s.targetY - s.mesh.position.y) < 0.01) { s.mesh.position.y = s.targetY; s.isMoving = false; }
+            
+            // 移動処理
+            let mx = moveVec.x, mz = moveVec.y;
+            if (keys['KeyW']) mz = -1; if (keys['KeyS']) mz = 1;
+            if (keys['KeyA']) mx = -1; if (keys['KeyD']) mx = 1;
+
+            if (mx !== 0 || mz !== 0) {
+                const dir = new THREE.Vector3(mx, 0, mz).applyQuaternion(camera.quaternion);
+                dir.y = 0; dir.normalize();
+                const nextPos = camera.position.clone().addScaledVector(dir, 0.12);
+                const pBox = new THREE.Box3().setFromCenterAndSize(nextPos, new THREE.Vector3(0.6, 1.8, 0.6));
+                if (!colliders.some(c => pBox.intersectsBox(c.box))) {
+                    camera.position.x = nextPos.x;
+                    camera.position.z = nextPos.z;
                 }
-            });
-
-            // キーボード移動
-            let x = 0, z = 0;
-            if (keys['KeyW']) z -= 1; if (keys['KeyS']) z += 1;
-            if (keys['KeyA']) x -= 1; if (keys['KeyD']) x += 1;
-            if (moveVec.x !== 0 || moveVec.y !== 0) { x = moveVec.x; z = moveVec.y; }
-
-            if (x !== 0 || z !== 0) {
-                const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y = 0; f.normalize();
-                const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
-                const vx = (f.x * -z + r.x * x) * 0.15, vz = (f.z * -z + r.z * x) * 0.15;
-                const nextPos = camera.position.clone().add(new THREE.Vector3(vx, 0, vz));
-                const pBox = new THREE.Box3().setFromCenterAndSize(nextPos, new THREE.Vector3(0.7, 1.8, 0.7));
-                if (!colliders.some(c => pBox.intersectsBox(c.box))) { camera.position.x += vx; camera.position.z += vz; }
-            }
-            light.position.copy(camera.position);
-
-            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
-            actionBtn.style.display = shutters.some(s => ray.ray.distanceToPoint(s.mesh.position) < 3.5) ? 'block' : 'none';
-
-            if (isBuildMode) {
-                const f = new THREE.Vector3(0,0,-4).applyQuaternion(camera.quaternion);
-                ghost.position.set(Math.round(camera.position.x + f.x), 2, Math.round(camera.position.z + f.z));
-                ghost.rotation.y = Math.round(camera.rotation.y / (Math.PI/2)) * (Math.PI/2);
             }
 
-            const cx = Math.round(camera.position.x / 8), cz = Math.round(camera.position.z / 8);
-            for(let i=cx-6; i<=cx+6; i++) for(let j=cz-6; j<=cz+6; j++) spawnChunk(i, j);
+            updateChunks();
             renderer.render(scene, camera);
         }
         animate();
