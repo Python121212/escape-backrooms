@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - Voice Chat</title>
+    <title>Backrooms MMO</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; }
         canvas { display: block; filter: contrast(1.1) brightness(1.2); image-rendering: pixelated; }
@@ -15,7 +15,7 @@
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>SYSTEM: VOICE READY<br>ACTION: TAP TO ENABLE MIC</div>
+        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>SYSTEM: ONLINE<br>ACTION: TAP TO START</div>
     </div>
     <div id="joy-base"><div id="stick"></div></div>
 
@@ -33,9 +33,9 @@
     <script type="module">
         import * as THREE from 'three';
         import { initializeApp } from 'firebase/app';
-        import { getDatabase, ref, set, onValue, onChildRemoved } from 'firebase/database';
+        import { getDatabase, ref, set, onValue, onChildRemoved, onDisconnect } from 'firebase/database';
 
-        // --- Firebase Config (そのまま利用) ---
+        // --- Firebase Config (Your Settings) ---
         const firebaseConfig = {
             apiKey: "AIzaSyDknkrM78uvtu5BfAYsuJCa-oRB2rfH3HQ",
             authDomain: "backrooms-mmo.firebaseapp.com",
@@ -50,62 +50,45 @@
         const myId = "player_" + Math.random().toString(36).substring(7);
         const myRef = ref(db, 'players/' + myId);
 
-        // --- PeerJS & Voice Chat Logic ---
+        // --- PeerJS & Voice ---
         const peer = new Peer(myId);
         let localStream;
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const listener = new THREE.AudioListener();
-
-        // 他人の声を鳴らすための器
         const remoteAudios = new Map();
 
         const initVoice = async () => {
             try {
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 document.getElementById('status').innerHTML += `<br>MIC: ACTIVE`;
-                
-                // 電話がかかってきた時の処理
                 peer.on('call', (call) => {
                     call.answer(localStream);
-                    call.on('stream', (remoteStream) => {
-                        addSpatialAudio(call.peer, remoteStream);
-                    });
+                    call.on('stream', (stream) => addSpatialAudio(call.peer, stream));
                 });
-            } catch (err) {
-                console.error("Mic failed", err);
-            }
+            } catch (err) { console.warn("Mic blocked"); }
         };
 
-        const addSpatialAudio = (peerId, stream) => {
-            if (remoteAudios.has(peerId)) return;
+        const addSpatialAudio = (id, stream) => {
+            if (remoteAudios.has(id)) return;
             const posAudio = new THREE.PositionalAudio(listener);
-            const mediaStreamSource = audioContext.createMediaStreamSource(stream);
-            posAudio.setNodeSource(mediaStreamSource);
-            posAudio.setRefDistance(2); // 音が減衰し始める距離
-            posAudio.setMaxDistance(15); // 音が聞こえなくなる距離
-            remoteAudios.set(peerId, posAudio);
-            
-            // アバターに音源を紐付ける
-            if (otherPlayers.has(peerId)) {
-                otherPlayers.get(peerId).add(posAudio);
-            }
+            posAudio.setNodeSource(audioContext.createMediaStreamSource(stream));
+            posAudio.setRefDistance(2); posAudio.setMaxDistance(15);
+            remoteAudios.set(id, posAudio);
+            if (otherPlayers.has(id)) otherPlayers.get(id).add(posAudio);
         };
 
-        // 誰かが入ってきたら電話をかける
-        const callPlayer = (peerId) => {
-            if (!localStream || peerId === myId) return;
-            const call = peer.call(peerId, localStream);
-            call.on('stream', (remoteStream) => {
-                addSpatialAudio(peerId, remoteStream);
-            });
+        const callPlayer = (id) => {
+            if (!localStream || id === myId) return;
+            const call = peer.call(id, localStream);
+            call.on('stream', (stream) => addSpatialAudio(id, stream));
         };
 
-        // --- 3D Scene Setup ---
+        // --- 3D Engine ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x3a3a00);
         scene.fog = new THREE.Fog(0x3a3a00, 1, 25);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
-        camera.add(listener); // カメラ（自分）に耳を付ける
+        camera.add(listener);
         camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
 
         const renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -126,17 +109,20 @@
             return g;
         }
 
-        // --- MMO 同期 ---
+        // --- Firebase MMO 同期 (改善版) ---
+        onDisconnect(myRef).remove(); // 切断時に自動削除を予約
+        set(myRef, { x: 0, y: 1.7, z: 0, ry: 0 }); // 初期位置送信
+
         onValue(ref(db, 'players'), (snapshot) => {
             const data = snapshot.val();
+            if(!data) return;
             for (let id in data) {
                 if (id === myId) continue;
                 if (!otherPlayers.has(id)) {
                     const model = createPlayerModel();
                     scene.add(model);
                     otherPlayers.set(id, model);
-                    // 新しい人が来たら電話をかける
-                    setTimeout(() => callPlayer(id), 1000);
+                    setTimeout(() => callPlayer(id), 1500);
                 }
                 const m = otherPlayers.get(id);
                 const p = data[id];
@@ -154,9 +140,7 @@
             }
         });
 
-        window.addEventListener('beforeunload', () => set(myRef, null));
-
-        // --- Controls (Keyboard + Mouse + Touch) ---
+        // --- Controls ---
         let keys = {};
         window.addEventListener('keydown', (e) => keys[e.code] = true);
         window.addEventListener('keyup', (e) => keys[e.code] = false);
@@ -168,15 +152,13 @@
         let audioStarted = false;
         const startAll = () => { 
             if(!audioStarted){ 
-                bgm.play(); audioStarted=true; 
-                initVoice(); // マイク開始
+                bgm.play(); audioStarted=true; initVoice(); 
                 if (audioContext.state === 'suspended') audioContext.resume();
             } 
         };
         window.addEventListener('mousedown', startAll, true);
         window.addEventListener('touchstart', startAll, true);
 
-        // マウス視点移動
         window.addEventListener('mousemove', (e) => {
             if(isMouseDown) {
                 camera.rotation.y -= (e.clientX - lastL.x) * 0.003;
@@ -187,7 +169,6 @@
         window.addEventListener('mousedown', (e) => { isMouseDown = true; lastL = { x: e.clientX, y: e.clientY }; });
         window.addEventListener('mouseup', () => isMouseDown = false);
 
-        // スマホ操作（既存通り）
         window.addEventListener('touchstart', (e) => {
             for(let t of e.changedTouches) {
                 const r = joyBase.getBoundingClientRect();
@@ -220,7 +201,6 @@
             }
         });
 
-        // 地形生成
         function spawn(cx, cz) {
             const k = `${cx},${cz}`; if(chunks.has(k)) return;
             const g = new THREE.Group();
@@ -236,7 +216,6 @@
         }
 
         let lastSend = 0, lastPos = new THREE.Vector3();
-
         function animate(t) {
             requestAnimationFrame(animate);
             let kx = 0, kz = 0;
