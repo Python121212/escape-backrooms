@@ -3,23 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms - MP3 Integrated</title>
+    <title>Backrooms - Final Build</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; }
         canvas { display: block; filter: contrast(1.1) brightness(1.2); image-rendering: pixelated; }
+        
+        /* UI表示 */
         #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; }
-        .vhs-text { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; font-size: 14px; text-shadow: 1px 1px #000; }
+        .vhs-text { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; font-size: 14px; text-shadow: 1px 1px #000; line-height: 1.4; }
+        
+        /* 右下ボタン類 */
         .controls { position: absolute; bottom: 20px; right: 20px; pointer-events: none; display: flex; flex-direction: column; z-index: 1001; }
         .btn { pointer-events: auto; padding: 12px; background: rgba(0,40,0,0.85); color: #0f0; border: 1px solid #0f0; margin-top: 5px; font-size: 11px; min-width: 90px; font-family: monospace; }
-        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); z-index: 1000; pointer-events: auto; }
-        #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; }
+        
+        /* 操作用スティック（左下固定） */
+        #joy-base { 
+            position: absolute; bottom: 40px; left: 40px; 
+            width: 80px; height: 80px; 
+            border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; 
+            background: rgba(0,255,0,0.1); z-index: 1000; 
+            pointer-events: auto;
+        }
+        #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; pointer-events: none; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>AUDIO: MP3 LOADED (TAP TO PLAY)</div>
+        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>SYSTEM: READY<br>AUDIO: TAP TO START</div>
         <div class="controls">
-            <button id="action-btn" class="btn" style="display:none;">INTERACT</button>
             <button id="place-btn" class="btn" style="display:none;">PLACE</button>
             <button id="type-btn" class="btn" style="display:none;">WALL</button>
             <button id="build-btn" class="btn">BUILD MODE</button>
@@ -28,21 +39,27 @@
     
     <div id="joy-base"><div id="stick"></div></div>
 
-    <audio id="bgm" src="buzz.mp3" loop></audio>
-
     <script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
     <script type="module">
         import * as THREE from 'three';
 
-        // --- Audio Logic ---
-        const bgm = document.getElementById('bgm');
-        window.addEventListener('touchstart', () => {
-            bgm.play().then(() => {
-                document.querySelector('.vhs-text').innerHTML = `REC ● <span id="timer">00:00:00</span><br>AUDIO: PLAYING (MP3)`;
-            }).catch(e => console.error("Audio error:", e));
-        }, { once: true });
+        // --- 音声ロジック (MP3ファイル: buzz.mp3) ---
+        const bgm = new Audio();
+        bgm.src = './buzz.mp3'; // 相対パス
+        bgm.loop = true;
+        const statusText = document.querySelector('.vhs-text');
 
-        // --- Three.js Setup ---
+        const playAudio = () => {
+            bgm.play().then(() => {
+                statusText.innerHTML = `REC ● <span id="timer">00:00:00</span><br>SYSTEM: RUNNING<br>AUDIO: PLAYING`;
+            }).catch(e => {
+                statusText.innerHTML = `REC ● <span id="timer">00:00:00</span><br>SYSTEM: ERROR<br>TAP TO RETRY`;
+            });
+        };
+        window.addEventListener('touchstart', playAudio, { once: true });
+        window.addEventListener('mousedown', playAudio, { once: true });
+
+        // --- 3Dエンジン設定 ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x3a3a00);
         scene.fog = new THREE.Fog(0x3a3a00, 1, 25);
@@ -54,13 +71,14 @@
         renderer.setPixelRatio(0.4); 
         document.body.appendChild(renderer.domElement);
 
-        const light = new THREE.PointLight(0xffffff, 4, 18);
+        const light = new THREE.PointLight(0xffffff, 4.5, 20); // ライト強化
         scene.add(light);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
-        const colliders = [], shutters = [], chunks = new Map();
-        const wallTypes = [{n:'SHUTTER', c:0xcccccc, s:true}, {n:'GLASS', c:0x88ccff, o:0.4}, {n:'IRON', c:0x333333}, {n:'WALL', c:0xccbb55}];
+        const colliders = [], chunks = new Map();
+        const wallTypes = [{n:'WALL', c:0xccbb55}, {n:'GLASS', c:0x88ccff, o:0.4}, {n:'IRON', c:0x333333}];
         let typeIdx = 0, isBuild = false;
+
         const ghost = new THREE.Mesh(new THREE.BoxGeometry(4,4,0.4), new THREE.MeshBasicMaterial({color:0x00ff00, transparent:true, opacity:0.3}));
         ghost.visible = false; scene.add(ghost);
 
@@ -69,7 +87,11 @@
             const g = new THREE.Group();
             const f = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x9a8c62})); f.rotation.x=-Math.PI/2; g.add(f);
             const c = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0xddcc66})); c.rotation.x=Math.PI/2; c.position.y=4; g.add(c);
-            const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.05, 3), new THREE.MeshBasicMaterial({color: 0xffffff})); lamp.position.set(0, 3.97, 0); g.add(lamp);
+            
+            // 蛍光灯ビジュアル
+            const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.05, 3), new THREE.MeshBasicMaterial({color: 0xffffff}));
+            lamp.position.set(0, 3.97, 0); g.add(lamp);
+
             if(Math.abs(Math.sin(cx*1.3+cz*0.7)) > 0.85) {
                 const w = new THREE.Mesh(new THREE.BoxGeometry(8,4,0.3), new THREE.MeshLambertMaterial({color:0xddcc66})); w.position.set(0,2,4); g.add(w);
                 colliders.push({box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*8,0,cz*8))});
@@ -77,16 +99,18 @@
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
         }
 
-        // --- Touch Control ---
+        // --- 操作ロジック (マルチタッチ完全対応) ---
         let mv = {x:0, z:0}, moveTouchId = null, lookTouchId = null, lastL = {x:0, y:0};
         const joyBase = document.getElementById('joy-base'), st = document.getElementById('stick');
 
         window.addEventListener('touchstart', (e) => {
             for(let t of e.changedTouches) {
                 const r = joyBase.getBoundingClientRect();
+                // スティック内なら移動
                 if(t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) {
                     moveTouchId = t.identifier;
                 } else if(lookTouchId === null) {
+                    // それ以外は視点移動（画面全体）
                     lookTouchId = t.identifier;
                     lastL = { x: t.clientX, y: t.clientY };
                 }
@@ -118,14 +142,13 @@
             }
         });
 
-        // --- UI Logic ---
+        // --- ビルドUI ---
         document.getElementById('build-btn').onclick = (e) => { e.stopPropagation(); isBuild=!isBuild; ghost.visible=isBuild; document.getElementById('place-btn').style.display = document.getElementById('type-btn').style.display = isBuild?'block':'none'; };
         document.getElementById('type-btn').onclick = (e) => { e.stopPropagation(); typeIdx=(typeIdx+1)%wallTypes.length; document.getElementById('type-btn').innerText=wallTypes[typeIdx].n; };
         document.getElementById('place-btn').onclick = (e) => { 
             const t = wallTypes[typeIdx], m = new THREE.Mesh(new THREE.BoxGeometry(4,4,0.4), new THREE.MeshLambertMaterial({color:t.c, transparent:!!t.o, opacity:t.o||1}));
             m.position.copy(ghost.position); m.rotation.y = ghost.rotation.y; scene.add(m);
-            const col = { box: new THREE.Box3().setFromObject(m), m }; colliders.push(col);
-            if(t.s) shutters.push({ m, col, open:false, ty:m.position.y, iy:m.position.y, moving:false });
+            colliders.push({ box: new THREE.Box3().setFromObject(m), m });
         };
 
         function animate(t) {
@@ -133,22 +156,25 @@
             const time = t * 0.001;
             const timerEl = document.getElementById('timer');
             if(timerEl) timerEl.innerText = new Date(t).toISOString().substr(14, 8);
+            
             if(mv.x || mv.z) {
                 const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
                 const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
                 const vel = new THREE.Vector3().addScaledVector(f, -mv.z).addScaledVector(r, mv.x).setLength(0.13);
                 const next = camera.position.clone().add(vel);
                 if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.5,1.5,0.5)).intersectsBox(c.box))) camera.position.copy(next);
-                camera.position.y = 1.7 + Math.sin(time*9)*0.02;
+                camera.position.y = 1.7 + Math.sin(time*9)*0.02; // 手ブレ感
             }
-            shutters.forEach(s => { if(s.moving){ s.m.position.y += (s.ty-s.m.position.y)*0.1; s.col.box.setFromObject(s.m); if(Math.abs(s.ty-s.m.position.y)<0.01) s.moving=false; }});
+
             if(isBuild) {
                 const f = new THREE.Vector3(0,0,-4).applyQuaternion(camera.quaternion);
                 ghost.position.set(Math.round((camera.position.x+f.x)/2)*2, 2, Math.round((camera.position.z+f.z)/2)*2);
                 ghost.rotation.y = Math.round(camera.rotation.y/(Math.PI/2))*(Math.PI/2);
             }
+
             const cx=Math.round(camera.position.x/8), cz=Math.round(camera.position.z/8);
             for(let i=cx-2; i<=cx+2; i++) for(let j=cz-2; j<=cz+2; j++) spawn(i,j);
+            
             light.position.copy(camera.position);
             renderer.render(scene, camera);
         }
