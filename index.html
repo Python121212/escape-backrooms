@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms - Full Area Look Fixed</title>
+    <title>Backrooms - MP3 Integrated</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; }
         canvas { display: block; filter: contrast(1.1) brightness(1.2); image-rendering: pixelated; }
@@ -11,21 +11,13 @@
         .vhs-text { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; font-size: 14px; text-shadow: 1px 1px #000; }
         .controls { position: absolute; bottom: 20px; right: 20px; pointer-events: none; display: flex; flex-direction: column; z-index: 1001; }
         .btn { pointer-events: auto; padding: 12px; background: rgba(0,40,0,0.85); color: #0f0; border: 1px solid #0f0; margin-top: 5px; font-size: 11px; min-width: 90px; font-family: monospace; }
-        
-        /* スティック（左下に固定） */
-        #joy-base { 
-            position: absolute; bottom: 40px; left: 40px; 
-            width: 80px; height: 80px; 
-            border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; 
-            background: rgba(0,255,0,0.1); z-index: 1000; 
-            pointer-events: auto; /* ここだけタッチを奪う */
-        }
-        #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; pointer-events: none; }
+        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); z-index: 1000; pointer-events: auto; }
+        #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>SYSTEM: FULL AREA LOOK</div>
+        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>AUDIO: MP3 LOADED (TAP TO PLAY)</div>
         <div class="controls">
             <button id="action-btn" class="btn" style="display:none;">INTERACT</button>
             <button id="place-btn" class="btn" style="display:none;">PLACE</button>
@@ -36,10 +28,21 @@
     
     <div id="joy-base"><div id="stick"></div></div>
 
+    <audio id="bgm" src="buzz.mp3" loop></audio>
+
     <script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
     <script type="module">
         import * as THREE from 'three';
 
+        // --- Audio Logic ---
+        const bgm = document.getElementById('bgm');
+        window.addEventListener('touchstart', () => {
+            bgm.play().then(() => {
+                document.querySelector('.vhs-text').innerHTML = `REC ● <span id="timer">00:00:00</span><br>AUDIO: PLAYING (MP3)`;
+            }).catch(e => console.error("Audio error:", e));
+        }, { once: true });
+
+        // --- Three.js Setup ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x3a3a00);
         scene.fog = new THREE.Fog(0x3a3a00, 1, 25);
@@ -48,9 +51,11 @@
 
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(0.4); document.body.appendChild(renderer.domElement);
+        renderer.setPixelRatio(0.4); 
+        document.body.appendChild(renderer.domElement);
 
-        const light = new THREE.PointLight(0xffffff, 4, 18); scene.add(light);
+        const light = new THREE.PointLight(0xffffff, 4, 18);
+        scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 
         const colliders = [], shutters = [], chunks = new Map();
@@ -72,18 +77,16 @@
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
         }
 
-        // --- 改良版マルチタッチ操作 ---
+        // --- Touch Control ---
         let mv = {x:0, z:0}, moveTouchId = null, lookTouchId = null, lastL = {x:0, y:0};
         const joyBase = document.getElementById('joy-base'), st = document.getElementById('stick');
 
         window.addEventListener('touchstart', (e) => {
             for(let t of e.changedTouches) {
                 const r = joyBase.getBoundingClientRect();
-                // 指がスティックの範囲内なら移動モード
                 if(t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) {
                     moveTouchId = t.identifier;
                 } else if(lookTouchId === null) {
-                    // それ以外なら視点移動モード
                     lookTouchId = t.identifier;
                     lastL = { x: t.clientX, y: t.clientY };
                 }
@@ -115,7 +118,7 @@
             }
         });
 
-        // --- UI ---
+        // --- UI Logic ---
         document.getElementById('build-btn').onclick = (e) => { e.stopPropagation(); isBuild=!isBuild; ghost.visible=isBuild; document.getElementById('place-btn').style.display = document.getElementById('type-btn').style.display = isBuild?'block':'none'; };
         document.getElementById('type-btn').onclick = (e) => { e.stopPropagation(); typeIdx=(typeIdx+1)%wallTypes.length; document.getElementById('type-btn').innerText=wallTypes[typeIdx].n; };
         document.getElementById('place-btn').onclick = (e) => { 
@@ -128,7 +131,8 @@
         function animate(t) {
             requestAnimationFrame(animate);
             const time = t * 0.001;
-            document.getElementById('timer').innerText = new Date(t).toISOString().substr(14, 8);
+            const timerEl = document.getElementById('timer');
+            if(timerEl) timerEl.innerText = new Date(t).toISOString().substr(14, 8);
             if(mv.x || mv.z) {
                 const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
                 const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
