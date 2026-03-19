@@ -3,34 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms - Display Fixed</title>
+    <title>Backrooms - Stick Fixed</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #111; touch-action: none; }
-        /* image-renderingを調整してドット感を強調 */
-        canvas { 
-            display: block;
-            filter: contrast(1.4) brightness(0.9) sepia(0.2); 
-            image-rendering: pixelated; 
-        }
-        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; color: #0f0; font-family: monospace; z-index: 10; }
-        .vhs-text { position: absolute; top: 20px; left: 20px; font-size: 18px; text-shadow: 2px 2px #000; }
+        body { margin: 0; overflow: hidden; background: #1a1a00; touch-action: none; }
+        canvas { display: block; filter: contrast(1.2) brightness(0.9); image-rendering: pixelated; }
+        
+        /* UIレイヤー */
+        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; }
+        .vhs-text { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; font-size: 16px; text-shadow: 1px 1px #000; }
+        
+        /* 操作ボタン */
         .controls { position: absolute; bottom: 20px; right: 20px; pointer-events: none; display: flex; flex-direction: column; }
-        .btn { pointer-events: auto; padding: 12px; background: rgba(0,20,0,0.8); color: #0f0; border: 1px solid #0f0; margin-top: 5px; font-size: 12px; min-width: 100px; }
-        #joy { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 1px solid #0f0; border-radius: 50%; pointer-events: auto; background: rgba(0,255,0,0.05); }
-        #stick { position: absolute; top: 20px; left: 20px; width: 40px; height: 40px; background: #0f0; border-radius: 50%; opacity: 0.3; pointer-events: none; }
+        .btn { pointer-events: auto; padding: 12px; background: rgba(0,40,0,0.9); color: #0f0; border: 1px solid #0f0; margin-top: 5px; font-size: 12px; min-width: 100px; font-family: monospace; }
+        
+        /* ★ジョイスティック（ここを修正） */
+        #joy-container { 
+            position: absolute; bottom: 40px; left: 40px; 
+            width: 100px; height: 100px; 
+            border: 2px solid #0f0; border-radius: 50%; 
+            background: rgba(0, 255, 0, 0.1);
+            z-index: 1000; pointer-events: auto; 
+            touch-action: none;
+        }
+        #stick { 
+            position: absolute; top: 50%; left: 50%; 
+            width: 44px; height: 44px; 
+            margin: -22px; 
+            background: #0f0; border-radius: 50%; 
+            box-shadow: 0 0 10px #0f0;
+            pointer-events: none; 
+        }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>LP 30fps</div>
+        <div class="vhs-text">REC ● <span id="timer">00:00:00</span></div>
         <div class="controls">
-            <button id="action-btn" class="btn" style="display:none;">USE</button>
+            <button id="action-btn" class="btn" style="display:none;">INTERACT</button>
             <button id="place-btn" class="btn" style="display:none;">PLACE</button>
             <button id="type-btn" class="btn" style="display:none;">WALL</button>
             <button id="build-btn" class="btn">BUILD MODE</button>
         </div>
     </div>
-    <div id="joy"><div id="stick"></div></div>
+    
+    <div id="joy-container">
+        <div id="stick"></div>
+    </div>
 
     <script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
     <script type="module">
@@ -38,22 +56,21 @@
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a00);
-        scene.fog = new THREE.Fog(0x1a1a00, 1, 20);
+        scene.fog = new THREE.Fog(0x1a1a00, 1, 25);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
-        camera.position.set(0, 1.7, 0); // 床の上（y=1.7）からスタート
+        camera.position.set(0, 1.7, 0); 
         camera.rotation.order = 'YXZ';
 
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(0.3); // VHSのザラザラ感。動かない場合はここを0.5に上げてみてください
+        renderer.setPixelRatio(0.4); // VHSの質感を出しつつ軽量化
         document.body.appendChild(renderer.domElement);
 
-        const light = new THREE.PointLight(0xffffff, 2, 15);
+        const light = new THREE.PointLight(0xffffff, 2.5, 18);
         scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
-        const wallMat = new THREE.MeshLambertMaterial({ color: 0xccbb55 });
         const colliders = [], shutters = [], chunks = new Map();
         const wallTypes = [{n:'SHUTTER', c:0xcccccc, s:true}, {n:'GLASS', c:0x88ccff, o:0.4}, {n:'IRON', c:0x333333}, {n:'WALL', c:0xccbb55}];
         let typeIdx = 0, isBuild = false;
@@ -67,37 +84,58 @@
             const f = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x8a7c52}));
             f.rotation.x=-Math.PI/2; g.add(f);
             const c = f.clone(); c.rotation.x=Math.PI/2; c.position.y=4; g.add(c);
-            const l = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 2.5), new THREE.MeshBasicMaterial({color: 0xffffff}));
-            l.position.set(0, 3.98, 0); g.add(l);
             
-            if(Math.abs(Math.sin(cx*13+cz*7)) > 0.75) {
-                const w = new THREE.Mesh(new THREE.BoxGeometry(8,4,0.3), wallMat);
+            // 壁の自動配置（軽量版）
+            if(Math.abs(Math.sin(cx*1.3+cz*0.7)) > 0.8) {
+                const w = new THREE.Mesh(new THREE.BoxGeometry(8,4,0.3), new THREE.MeshLambertMaterial({color:0xccbb55}));
                 w.position.set(0,2,4); g.add(w);
                 colliders.push({box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*8,0,cz*8))});
             }
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
         }
 
-        // --- Touch ---
+        // --- 操作ロジック ---
         let mv = {x:0, z:0}, lookId = null, lastL = {x:0, y:0};
-        const joy = document.getElementById('joy'), st = document.getElementById('stick');
+        const joy = document.getElementById('joy-container'), st = document.getElementById('stick');
+
+        joy.addEventListener('touchstart', (e) => e.preventDefault(), {passive:false});
         joy.addEventListener('touchmove', (e) => {
             const t = e.touches[0], r = joy.getBoundingClientRect();
-            const dx = t.clientX-(r.left+40), dy = t.clientY-(r.top+40);
-            const d = Math.min(30, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy,dx);
-            mv = {x: Math.cos(a)*(d/30), z: Math.sin(a)*(d/30)};
+            const dx = t.clientX-(r.left+50), dy = t.clientY-(r.top+50);
+            const d = Math.min(40, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy,dx);
+            mv = {x: Math.cos(a)*(d/40), z: Math.sin(a)*(d/40)};
             st.style.transform = `translate(${Math.cos(a)*d}px,${Math.sin(a)*d}px)`;
         }, {passive:false});
-        window.addEventListener('touchend', () => { mv={x:0,z:0}; st.style.transform='none'; lookId=null; });
-        window.addEventListener('touchstart', (e) => { if(e.touches[0].clientX > window.innerWidth/2) { lookId=e.touches[0].identifier; lastL={x:e.touches[0].clientX, y:e.touches[0].clientY}; }});
-        window.addEventListener('touchmove', (e) => {
-            const t = Array.from(e.touches).find(v => v.identifier === lookId);
-            if(t) { camera.rotation.y -= (t.clientX-lastL.x)*0.005; camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x-(t.clientY-lastL.y)*0.005)); lastL={x:t.clientX, y:t.clientY}; }
+
+        window.addEventListener('touchend', (e) => {
+            mv={x:0,z:0}; st.style.transform='none'; lookId=null;
         });
 
-        // --- UI ---
-        document.getElementById('build-btn').onclick = (e) => { e.stopPropagation(); isBuild=!isBuild; ghost.visible=isBuild; document.getElementById('place-btn').style.display = document.getElementById('type-btn').style.display = isBuild?'block':'none'; };
-        document.getElementById('type-btn').onclick = (e) => { e.stopPropagation(); typeIdx=(typeIdx+1)%wallTypes.length; document.getElementById('type-btn').innerText=wallTypes[typeIdx].n; };
+        window.addEventListener('touchstart', (e) => {
+            if(e.touches[0].clientX > window.innerWidth/2) {
+                lookId = e.touches[0].identifier;
+                lastL = {x:e.touches[0].clientX, y:e.touches[0].clientY};
+            }
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            const t = Array.from(e.touches).find(v => v.identifier === lookId);
+            if(t) {
+                camera.rotation.y -= (t.clientX-lastL.x)*0.006;
+                camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x-(t.clientY-lastL.y)*0.006));
+                lastL={x:t.clientX, y:t.clientY};
+            }
+        });
+
+        // --- UIアクション ---
+        document.getElementById('build-btn').onclick = (e) => { 
+            e.stopPropagation(); isBuild=!isBuild; ghost.visible=isBuild; 
+            document.getElementById('place-btn').style.display = document.getElementById('type-btn').style.display = isBuild?'block':'none'; 
+        };
+        document.getElementById('type-btn').onclick = (e) => { 
+            e.stopPropagation(); typeIdx=(typeIdx+1)%wallTypes.length; 
+            document.getElementById('type-btn').innerText=wallTypes[typeIdx].n; 
+        };
         document.getElementById('place-btn').onclick = (e) => { 
             e.stopPropagation(); 
             const t = wallTypes[typeIdx];
@@ -119,7 +157,7 @@
                 const vel = new THREE.Vector3().addScaledVector(f, -mv.z).addScaledVector(r, mv.x).setLength(0.12);
                 const next = camera.position.clone().add(vel);
                 if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.5,1.5,0.5)).intersectsBox(c.box))) camera.position.copy(next);
-                camera.position.y = 1.7 + Math.sin(time*10)*0.03; // 手ブレ
+                camera.position.y = 1.7 + Math.sin(time*8)*0.02; // 歩行時の手ブレ
             }
 
             shutters.forEach(s => { if(s.moving){ s.m.position.y += (s.ty-s.m.position.y)*0.1; s.col.box.setFromObject(s.m); if(Math.abs(s.ty-s.m.position.y)<0.01) s.moving=false; }});
