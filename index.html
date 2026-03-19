@@ -3,10 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - A-Sync Hazmat</title>
+    <title>Backrooms MMO - A-Sync Fixed</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; }
-        /* レトロな質感を出すためのフィルタ（そのまま） */
         canvas { display: block; filter: contrast(1.1) brightness(1.1); image-rendering: pixelated; }
         #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; }
         .vhs-text { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; font-size: 11px; text-shadow: 1px 1px #000; line-height: 1.4; }
@@ -16,7 +15,7 @@
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>SYSTEM: A-SYNC PROTOCOL<br>ACTION: TAP TO ENABLE MIC</div>
+        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>SYSTEM: A-SYNC PROTOCOL<br>ACTION: TAP TO START</div>
     </div>
     <div id="joy-base"><div id="stick"></div></div>
 
@@ -36,7 +35,6 @@
         import { initializeApp } from 'firebase/app';
         import { getDatabase, ref, set, onValue, onChildRemoved, onDisconnect } from 'firebase/database';
 
-        // --- Firebase Config (差し替え済み) ---
         const firebaseConfig = {
             apiKey: "AIzaSyDknkrM78uvtu5BfAYsuJCa-oRB2rfH3HQ",
             authDomain: "backrooms-mmo.firebaseapp.com",
@@ -49,14 +47,12 @@
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
 
-        // ID固定（sessionStorage）
         if (!sessionStorage.getItem('backrooms_id')) {
             sessionStorage.setItem('backrooms_id', "A-SYNC_" + Math.random().toString(36).substring(7));
         }
         const myId = sessionStorage.getItem('backrooms_id');
         const myRef = ref(db, 'players/' + myId);
 
-        // --- PeerJS & Voice ---
         const peer = new Peer(myId);
         let localStream;
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -89,7 +85,6 @@
             call.on('stream', (stream) => addSpatialAudio(id, stream));
         };
 
-        // --- 3D Scene ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x3a3a00);
         scene.fog = new THREE.Fog(0x3a3a00, 1, 25);
@@ -99,62 +94,63 @@
 
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio > 1 ? 0.6 : 1); // 処理速度と画質のバランスを調整
+        renderer.setPixelRatio(window.devicePixelRatio > 1 ? 0.6 : 1);
         document.body.appendChild(renderer.domElement);
 
         const light = new THREE.PointLight(0xffffff, 4.5, 20); scene.add(light);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.9)); // 全体の明るさを少し上げる
+        scene.add(new THREE.AmbientLight(0xffffff, 0.9));
 
         const colliders = [], chunks = new Map(), otherPlayers = new Map();
 
-        // --- ★A-Sync Hazmat アバター作成 (強化版) ---
+        // --- 改良版 A-Sync Hazmat アバター (肩関節固定) ---
         function createPlayerModel() {
             const group = new THREE.Group();
-
-            // 防護服の黄色（画像に近い、少しくすんだ黄色。少し発光させる）
             const hazmatMat = new THREE.MeshLambertMaterial({ color: 0xcccc55, emissive: 0x222200 });
-            // バイザーの黒（光を反射するマテリアル。shininessでツヤを出す）
             const visorMat = new THREE.MeshPhongMaterial({ color: 0x000000, shininess: 120 });
-            // バイザーのフレーム（真っ黒でマット）
             const frameMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
 
-            // 胴体（円柱を使い、防護服の袖の「ダボッと感」を表現）
-            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.35, 1.0, 10), hazmatMat);
+            // 胴体
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 1.0, 10), hazmatMat);
             body.position.y = 0.8; group.add(body);
 
-            // 頭（ヘルメット）
-            const head = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.45, 10), hazmatMat);
-            head.position.y = 1.45; group.add(head);
+            // 頭部
+            const headGrp = new THREE.Group();
+            headGrp.position.y = 1.45;
+            const head = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.45, 10), hazmatMat);
+            headGrp.add(head);
+            const vFrame = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.38, 0.1), frameMat);
+            vFrame.position.set(0, 0, 0.17); headGrp.add(vFrame);
+            const vMain = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.35, 0.1), visorMat);
+            vMain.position.set(0, 0, 0.18); headGrp.add(vMain);
+            group.add(headGrp);
 
-            // ★バイザーフレーム（画像にある黒い枠）
-            const visorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.38, 0.1), frameMat);
-            visorFrame.position.set(0, 1.45, 0.17); // バイザーの少し後ろ
-            group.add(visorFrame);
+            // 右腕 (ピボット構造)
+            const rArmPivot = new THREE.Group();
+            rArmPivot.position.set(-0.32, 1.25, 0); 
+            const rArm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.7, 8), hazmatMat);
+            rArm.position.y = -0.3; rArmPivot.add(rArm);
+            rArmPivot.rotation.z = 0.35; group.add(rArmPivot);
 
-            // ★バイザー全体（光を反射するように）
-            const visorMain = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.35, 0.1), visorMat);
-            visorMain.position.set(0, 1.45, 0.18); // 少し前に出す
-            group.add(visorMain);
+            // 左腕 (ピボット構造)
+            const lArmPivot = new THREE.Group();
+            lArmPivot.position.set(0.32, 1.25, 0);
+            const lArm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.7, 8), hazmatMat);
+            lArm.position.y = -0.3; lArmPivot.add(lArm);
+            lArmPivot.rotation.z = -0.35; group.add(lArmPivot);
 
-            // 腕（円柱にして影を出やすく）
-            const armGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.7, 8);
-            const rArm = new THREE.Mesh(armGeo, hazmatMat); rArm.position.set(-0.4, 0.9, 0); rArm.rotation.z = 0.4; group.add(rArm);
-            const lArm = new THREE.Mesh(armGeo, hazmatMat); lArm.position.set(0.4, 0.9, 0); lArm.rotation.z = -0.4; group.add(lArm);
+            // 脚
+            const rLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.8, 8), hazmatMat);
+            rLeg.position.set(-0.16, 0.4, 0); group.add(rLeg);
+            const lLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.8, 8), hazmatMat);
+            lLeg.position.set(0.16, 0.4, 0); group.add(lLeg);
 
-            // 脚（画像のように下を太く）
-            const legGeo = new THREE.CylinderGeometry(0.12, 0.15, 0.8, 8);
-            const rLeg = new THREE.Mesh(legGeo, hazmatMat); rLeg.position.set(-0.18, 0.4, 0); group.add(rLeg);
-            const lLeg = new THREE.Mesh(legGeo, hazmatMat); lLeg.position.set(0.18, 0.4, 0); group.add(lLeg);
-
-            // ★バックパック（画像にはないが、A-Syncの生命維持装置として背中に配置）
-            const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.7, 0.2), hazmatMat);
-            backpack.position.set(0, 0.9, -0.25);
-            group.add(backpack);
+            // 背負い箱
+            const bp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.65, 0.22), hazmatMat);
+            bp.position.set(0, 0.9, -0.22); group.add(bp);
 
             return group;
         }
 
-        // --- Firebase MMO ---
         onDisconnect(myRef).remove();
         set(myRef, { x: 0, y: 1.7, z: 0, ry: 0 });
 
@@ -170,7 +166,7 @@
                     const model = createPlayerModel();
                     scene.add(model);
                     otherPlayers.set(id, model);
-                    setTimeout(() => callPlayer(id), 1500); // 通信安定のため少し待ってから電話
+                    setTimeout(() => callPlayer(id), 1500);
                 }
                 const m = otherPlayers.get(id);
                 const p = data[id];
@@ -188,7 +184,6 @@
             }
         });
 
-        // --- Controls ---
         let keys = {};
         window.addEventListener('keydown', (e) => keys[e.code] = true);
         window.addEventListener('keyup', (e) => keys[e.code] = false);
@@ -207,10 +202,9 @@
         window.addEventListener('mousedown', startAll, true);
         window.addEventListener('touchstart', startAll, true);
 
-        // ★視点移動（ドラッグ）の計算式を調整し、スマホでもPCのように滑らかに周りを見渡せるようにする。
         window.addEventListener('mousemove', (e) => {
             if(isMouseDown) {
-                camera.rotation.y -= (e.clientX - lastL.x) * 0.003; // PCマウス用
+                camera.rotation.y -= (e.clientX - lastL.x) * 0.003;
                 camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (e.clientY - lastL.y) * 0.003));
                 lastL = { x: e.clientX, y: e.clientY };
             }
@@ -218,7 +212,6 @@
         window.addEventListener('mousedown', (e) => { isMouseDown = true; lastL = { x: e.clientX, y: e.clientY }; });
         window.addEventListener('mouseup', () => isMouseDown = false);
 
-        // スマホタッチ
         window.addEventListener('touchstart', (e) => {
             for(let t of e.changedTouches) {
                 const r = joyBase.getBoundingClientRect();
@@ -237,8 +230,7 @@
                     mv = { x: Math.cos(a) * (d / 35), z: Math.sin(a) * (d / 35) };
                     st.style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
                 } else if(t.identifier === lookId) {
-                    // ★スマホタッチ用（PCマウスとは別の計算）
-                    camera.rotation.y -= (t.clientX - lastL.x) * 0.008; // 感度を調整
+                    camera.rotation.y -= (t.clientX - lastL.x) * 0.008;
                     camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastL.y) * 0.008));
                     lastL = { x: t.clientX, y: t.clientY };
                 }
@@ -252,7 +244,6 @@
             }
         });
 
-        // 地形生成（そのまま）
         function spawn(cx, cz) {
             const k = `${cx},${cz}`; if(chunks.has(k)) return;
             const g = new THREE.Group();
