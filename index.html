@@ -3,13 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms - Ultra Optimized</title>
+    <title>Backrooms - Fix Movement</title>
     <style>
         body { margin: 0; overflow: hidden; background: #dac05e; touch-action: none; font-family: monospace; }
         #ui-container { position: absolute; width: 100%; height: 100%; pointer-events: none; z-index: 100; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-end; padding: 20px; box-sizing: border-box; }
-        .btn { pointer-events: auto; padding: 12px; background: rgba(0,0,0,0.8); color: white; border: 2px solid #fff; border-radius: 6px; font-size: 14px; margin-bottom: 8px; min-width: 140px; font-weight: bold; }
-        #move-zone { position: absolute; bottom: 30px; left: 30px; width: 80px; height: 80px; background: rgba(255,255,255,0.1); border-radius: 50%; }
-        #stick { position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; margin: -15px; background: rgba(0,0,0,0.4); border-radius: 50%; }
+        .btn { pointer-events: auto; padding: 15px; background: rgba(0,0,0,0.8); color: white; border: 2px solid #fff; border-radius: 8px; font-size: 14px; margin-bottom: 10px; min-width: 150px; font-weight: bold; }
+        /* スティックの外枠 */
+        #move-zone { position: absolute; bottom: 40px; left: 40px; width: 100px; height: 100px; background: rgba(255,255,255,0.2); border-radius: 50%; border: 2px solid rgba(0,0,0,0.3); pointer-events: auto; z-index: 200; }
+        /* 動くスティック本体 */
+        #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: rgba(0,0,0,0.5); border-radius: 50%; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -25,45 +27,26 @@
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0xdac05e);
-        scene.fog = new THREE.Fog(0xdac05e, 1, 40);
+        scene.fog = new THREE.Fog(0xdac05e, 1, 35);
 
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 60);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
         camera.position.set(0, 1.7, 0);
         camera.rotation.order = 'YXZ';
 
-        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+        const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(1);
         document.body.appendChild(renderer.domElement);
 
-        // 環境光を強めにして、個別のライトを減らす
-        scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-        const mainLight = new THREE.PointLight(0xffffee, 1.2, 25);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const mainLight = new THREE.PointLight(0xffffee, 1.0, 15);
         scene.add(mainLight);
-
-        // 天井を1つの大きな板にしてプレイヤーに追従させる
-        const ceilingGeo = new THREE.PlaneGeometry(100, 100);
-        const ceilingMat = new THREE.MeshLambertMaterial({ color: 0xdac05e });
-        const ceiling = new THREE.Mesh(ceilingGeo, ceilingMat);
-        ceiling.rotation.x = Math.PI / 2;
-        ceiling.position.y = 4;
-        scene.add(ceiling);
-
-        // 蛍光灯の見た目だけを配置（光らせないことで軽量化）
-        const lampGeo = new THREE.BoxGeometry(0.4, 0.02, 2);
-        const lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        const lamps = new THREE.Group();
-        for(let i = -5; i <= 5; i++) {
-            for(let j = -5; j <= 5; j++) {
-                const l = new THREE.Mesh(lampGeo, lampMat);
-                l.position.set(i * 10, 3.99, j * 10);
-                lamps.add(l);
-            }
-        }
-        scene.add(lamps);
 
         const wallMat = new THREE.MeshLambertMaterial({ color: 0xccbb55 });
         const floorMat = new THREE.MeshLambertMaterial({ color: 0x8a7c52 });
+        const ceilMat = new THREE.MeshLambertMaterial({ color: 0xdac05e });
+        const lampMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
         const chunks = new Map();
         const colliders = [];
 
@@ -72,18 +55,21 @@
             if (chunks.has(key)) return;
 
             const group = new THREE.Group();
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), floorMat);
-            floor.rotation.x = -Math.PI / 2;
-            group.add(floor);
+            // 床
+            const f = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), floorMat);
+            f.rotation.x = -Math.PI / 2; group.add(f);
+            // 天井
+            const c = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), ceilMat);
+            c.rotation.x = Math.PI / 2; c.position.y = 4; group.add(c);
+            // 蛍光灯
+            const l = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.01, 2), lampMat);
+            l.position.set(0, 3.99, 0); group.add(l);
 
             const seed = Math.abs(Math.sin(cx * 12.9 + cz * 78.2) * 437) % 1;
-            if (seed > 0.75) {
+            if (seed > 0.8) {
                 const w = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 0.5), wallMat);
-                w.position.set(0, 2, 4);
-                group.add(w);
-                const box = new THREE.Box3().setFromObject(w);
-                box.translate(new THREE.Vector3(cx * 8, 0, cz * 8));
-                colliders.push({ box, id: key });
+                w.position.set(0, 2, 4); group.add(w);
+                colliders.push({ box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*8, 0, cz*8)) });
             }
 
             group.position.set(cx * 8, 0, cz * 8);
@@ -91,11 +77,44 @@
             chunks.set(key, group);
         }
 
-        let keys = {};
+        // --- PC移動管理 ---
+        const keys = {};
         window.addEventListener('keydown', e => keys[e.code] = true);
         window.addEventListener('keyup', e => keys[e.code] = false);
 
-        // マウス・スマホ操作は維持
+        // --- スマホ移動管理 (スティック) ---
+        let moveVec = { x: 0, z: 0 };
+        const moveZone = document.getElementById('move-zone');
+        const stick = document.getElementById('stick');
+
+        moveZone.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            const r = moveZone.getBoundingClientRect();
+            updateStick(touch.clientX, touch.clientY, r);
+        });
+
+        moveZone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const r = moveZone.getBoundingClientRect();
+            updateStick(touch.clientX, touch.clientY, r);
+        }, { passive: false });
+
+        moveZone.addEventListener('touchend', () => {
+            moveVec = { x: 0, z: 0 };
+            stick.style.transform = `translate(0px, 0px)`;
+        });
+
+        function updateStick(tx, ty, r) {
+            const dx = tx - (r.left + 50);
+            const dy = ty - (r.top + 50);
+            const dist = Math.min(40, Math.sqrt(dx*dx + dy*dy));
+            const angle = Math.atan2(dy, dx);
+            moveVec = { x: Math.cos(angle) * (dist / 40), z: Math.sin(angle) * (dist / 40) };
+            stick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+        }
+
+        // --- カメラ回転 ---
         window.addEventListener('mousemove', e => {
             if (document.pointerLockElement) {
                 camera.rotation.y -= e.movementX * 0.003;
@@ -104,35 +123,49 @@
         });
         renderer.domElement.onclick = () => renderer.domElement.requestPointerLock();
 
+        // スマホ視点移動 (右半分)
+        let lastTouch = null;
+        window.addEventListener('touchstart', (e) => {
+            if (e.touches[0].clientX > window.innerWidth / 2) {
+                lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+        });
+        window.addEventListener('touchmove', (e) => {
+            if (lastTouch) {
+                const t = e.touches[0];
+                camera.rotation.y -= (t.clientX - lastTouch.x) * 0.005;
+                camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastTouch.y) * 0.005));
+                lastTouch = { x: t.clientX, y: t.clientY };
+            }
+        });
+        window.addEventListener('touchend', () => lastTouch = null);
+
         function animate() {
             requestAnimationFrame(animate);
-            
-            let mx = 0, mz = 0;
-            if (keys['KeyW']) mz = -1; if (keys['KeyS']) mz = 1;
-            if (keys['KeyA']) mx = -1; if (keys['KeyD']) mx = 1;
 
-            if (mx !== 0 || mz !== 0) {
-                const dir = new THREE.Vector3(mx, 0, mz).applyQuaternion(camera.quaternion);
-                dir.y = 0; dir.normalize();
-                const nextPos = camera.position.clone().addScaledVector(dir, 0.15);
+            // 移動計算
+            let vx = 0, vz = 0;
+            if (keys['KeyW']) vz = -1; if (keys['KeyS']) vz = 1;
+            if (keys['KeyA']) vx = -1; if (keys['KeyD']) vx = 1;
+            if (moveVec.x !== 0 || moveVec.z !== 0) { vx = moveVec.x; vz = moveVec.z; }
+
+            if (vx !== 0 || vz !== 0) {
+                const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y = 0; f.normalize();
+                const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
+                const vel = new THREE.Vector3().addScaledVector(f, -vz).addScaledVector(r, vx).setLength(0.12);
+                
+                const nextPos = camera.position.clone().add(vel);
                 const pBox = new THREE.Box3().setFromCenterAndSize(nextPos, new THREE.Vector3(0.6, 1.8, 0.6));
                 if (!colliders.some(c => pBox.intersectsBox(c.box))) {
                     camera.position.copy(nextPos);
                 }
             }
 
-            // 天井とライトをプレイヤーに追従させる（これで無限に見える）
-            ceiling.position.x = camera.position.x;
-            ceiling.position.z = camera.position.z;
-            lamps.position.x = Math.floor(camera.position.x / 10) * 10;
-            lamps.position.z = Math.floor(camera.position.z / 10) * 10;
             mainLight.position.copy(camera.position);
 
             const cx = Math.round(camera.position.x / 8);
             const cz = Math.round(camera.position.z / 8);
-            for (let x = cx - 4; x <= cx + 4; x++) {
-                for (let z = cz - 4; z <= cz + 4; z++) spawnChunk(x, z);
-            }
+            for(let i=cx-4; i<=cx+4; i++) for(let j=cz-4; j<=cz+4; j++) spawnChunk(i, j);
 
             renderer.render(scene, camera);
         }
