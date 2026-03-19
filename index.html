@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms - Fix Shutter Collision</title>
+    <title>Backrooms - Infinite Maze</title>
     <style>
         body { margin: 0; overflow: hidden; background: #dac05e; touch-action: none; font-family: monospace; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; }
@@ -31,7 +31,7 @@
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0xdac05e);
-        scene.fog = new THREE.Fog(0xdac05e, 1, 35);
+        scene.fog = new THREE.Fog(0xdac05e, 1, 30);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
         camera.position.set(0, 1.7, 0);
@@ -43,85 +43,74 @@
         document.body.appendChild(renderer.domElement);
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-        const mainLight = new THREE.PointLight(0xffffee, 1.2, 18);
+        const mainLight = new THREE.PointLight(0xffffee, 1.5, 20);
         scene.add(mainLight);
 
+        const CHUNK_SIZE = 8;
+        const wallMat = new THREE.MeshLambertMaterial({ color: 0xccbb55 });
+        const floorMat = new THREE.MeshLambertMaterial({ color: 0x8a7c52 });
+        const ceilMat = new THREE.MeshLambertMaterial({ color: 0xdac05e });
+        const chunks = new Map(), colliders = [], shutters = [];
+        
+        // --- 建築システム ---
         const wallTypes = [
-            { name: 'SHUTTER', color: 0xcccccc, opacity: 1, isShutter: true },
+            { name: 'SHUTTER', color: 0xcccccc, isShutter: true },
             { name: 'GLASS', color: 0x88ccff, opacity: 0.4 },
-            { name: 'IRON', color: 0x333333, opacity: 1 },
-            { name: 'WALL', color: 0xccbb55, opacity: 1 }
+            { name: 'IRON', color: 0x333333 },
+            { name: 'WALL', color: 0xccbb55 }
         ];
-        let currentTypeIdx = 0;
-
-        const wallGeo = new THREE.BoxGeometry(4, 4, 0.4);
-        const colliders = [], shutters = [], chunks = new Map();
-        const ghost = new THREE.Mesh(wallGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 }));
+        let currentTypeIdx = 0, isBuildMode = false;
+        const ghost = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 0.4), new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 }));
         ghost.visible = false; scene.add(ghost);
 
-        function createObject(pos, rot, typeIdx) {
+        function createWall(pos, rot, typeIdx, isAuto = false) {
             const t = wallTypes[typeIdx];
-            const mesh = new THREE.Mesh(wallGeo, new THREE.MeshLambertMaterial({ color: t.color, transparent: t.opacity < 1, opacity: t.opacity }));
-            mesh.position.copy(pos);
-            mesh.rotation.y = rot;
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(isAuto ? 8 : 4, 4, 0.5), new THREE.MeshLambertMaterial({ color: t.color, transparent: !!t.opacity, opacity: t.opacity || 1 }));
+            mesh.position.copy(pos); mesh.rotation.y = rot;
             scene.add(mesh);
-
-            const collider = { box: new THREE.Box3().setFromObject(mesh), mesh: mesh };
-            colliders.push(collider);
-
+            const col = { box: new THREE.Box3().setFromObject(mesh), mesh };
+            colliders.push(col);
             if (t.isShutter) {
-                // ケース（上部の固定部分）
-                const cMesh = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.6, 0.6), new THREE.MeshLambertMaterial({color: 0x444444}));
-                cMesh.position.set(pos.x, pos.y + 2.1, pos.z); cMesh.rotation.y = rot; scene.add(cMesh);
-                // シャッター管理データ（colliderも持たせる）
-                shutters.push({ mesh, collider, isOpen: false, targetY: pos.y, initialY: pos.y, isMoving: false });
+                shutters.push({ mesh, collider: col, isOpen: false, targetY: pos.y, initialY: pos.y, isMoving: false });
             }
         }
 
+        // --- 無限生成ロジック (斜め対応) ---
         function spawnChunk(cx, cz) {
             const key = `${cx},${cz}`; if (chunks.has(key)) return;
             const g = new THREE.Group();
-            const f = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.MeshLambertMaterial({color: 0x8a7c52}));
-            f.rotation.x = -Math.PI/2; g.add(f);
-            const c = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.MeshLambertMaterial({color: 0xdac05e}));
-            c.rotation.x = Math.PI/2; c.position.y = 4; g.add(c);
+            const f = new THREE.Mesh(new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE), floorMat); f.rotation.x = -Math.PI/2; g.add(f);
+            const c = new THREE.Mesh(new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE), ceilMat); c.rotation.x = Math.PI/2; c.position.y = 4; g.add(c);
             const l = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 2.5), new THREE.MeshBasicMaterial({color: 0xffffff}));
             l.position.set(0, 3.98, 0); g.add(l);
-            
-            if (Math.abs(Math.sin(cx*12.9 + cz*78.2)) > 0.88) {
-                const w = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 0.5), new THREE.MeshLambertMaterial({color: 0xccbb55}));
-                w.position.set(0, 2, 4); g.add(w);
-                colliders.push({ box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*8, 0, cz*8)) });
+
+            // 迷路風の壁配置アルゴリズム
+            const seed = (n) => Math.abs(Math.sin(n * 12.9898 + key.hashCode() * 78.233) * 43758.5453) % 1;
+            String.prototype.hashCode = function() {
+                let hash = 0; for (let i = 0; i < this.length; i++) hash = ((hash << 5) - hash) + this.charCodeAt(i);
+                return hash;
+            };
+
+            // 北側と西側に壁を置くか判定（これで格子状に隙間なく埋まる）
+            if (seed(1) > 0.7) {
+                const w = new THREE.Mesh(new THREE.BoxGeometry(CHUNK_SIZE, 4, 0.5), wallMat);
+                w.position.set(0, 2, CHUNK_SIZE/2); g.add(w);
+                colliders.push({ box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*CHUNK_SIZE, 0, cz*CHUNK_SIZE)) });
             }
-            g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(key, g);
+            if (seed(2) > 0.7) {
+                const w = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, CHUNK_SIZE), wallMat);
+                w.position.set(CHUNK_SIZE/2, 2, 0); g.add(w);
+                colliders.push({ box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*CHUNK_SIZE, 0, cz*CHUNK_SIZE)) });
+            }
+
+            g.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
+            scene.add(g); chunks.set(key, g);
         }
 
-        // UI & Controls
-        const buildBtn = document.getElementById('build-btn'), placeBtn = document.getElementById('place-btn'), 
-              typeBtn = document.getElementById('type-btn'), actionBtn = document.getElementById('action-btn');
-        let isBuildMode = false;
-
-        buildBtn.onclick = (e) => {
-            e.stopPropagation(); isBuildMode = !isBuildMode;
-            ghost.visible = isBuildMode;
-            placeBtn.style.display = typeBtn.style.display = isBuildMode ? 'block' : 'none';
-        };
-        typeBtn.onclick = (e) => { e.stopPropagation(); currentTypeIdx = (currentTypeIdx + 1) % wallTypes.length; typeBtn.innerText = `TYPE: ${wallTypes[currentTypeIdx].name}`; };
-        placeBtn.onclick = (e) => { e.stopPropagation(); if(isBuildMode) createObject(ghost.position.clone(), ghost.rotation.y, currentTypeIdx); };
-        actionBtn.onclick = (e) => {
-            e.stopPropagation();
-            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
-            const hit = shutters.find(s => ray.ray.distanceToPoint(s.mesh.position) < 3);
-            if (hit && !hit.isMoving) {
-                hit.isOpen = !hit.isOpen;
-                hit.targetY = hit.isOpen ? hit.initialY + 3.8 : hit.initialY;
-                hit.isMoving = true;
-            }
-        };
-
-        // タッチ移動
+        // --- 操作系 ---
         let moveVec = { x: 0, z: 0 }, moveTouchId = null, lookTouchId = null, lastLookPos = { x: 0, y: 0 };
         const moveZone = document.getElementById('move-zone');
+
         moveZone.addEventListener('touchstart', (e) => { moveTouchId = e.targetTouches[0].identifier; });
         moveZone.addEventListener('touchmove', (e) => {
             e.preventDefault();
@@ -130,24 +119,19 @@
                 const r = moveZone.getBoundingClientRect(), dx = t.clientX - (r.left + 50), dy = t.clientY - (r.top + 50);
                 const d = Math.min(40, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy, dx);
                 moveVec = { x: Math.cos(a)*(d/40), z: Math.sin(a)*(d/40) };
+                document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*dist}px)`; // distをdに
                 document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
             }
         }, { passive: false });
 
         window.addEventListener('touchstart', (e) => {
-            for (let t of e.changedTouches) {
-                if (t.clientX > window.innerWidth / 2 && lookTouchId === null) {
-                    lookTouchId = t.identifier; lastLookPos = { x: t.clientX, y: t.clientY };
-                }
-            }
+            for (let t of e.changedTouches) if (t.clientX > window.innerWidth / 2 && lookTouchId === null) { lookTouchId = t.identifier; lastLookPos = { x: t.clientX, y: t.clientY }; }
         });
         window.addEventListener('touchmove', (e) => {
-            for (let t of e.changedTouches) {
-                if (t.identifier === lookTouchId) {
-                    camera.rotation.y -= (t.clientX - lastLookPos.x) * 0.005;
-                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastLookPos.y) * 0.005));
-                    lastLookPos = { x: t.clientX, y: t.clientY };
-                }
+            for (let t of e.changedTouches) if (t.identifier === lookTouchId) {
+                camera.rotation.y -= (t.clientX - lastLookPos.x) * 0.005;
+                camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastLookPos.y) * 0.005));
+                lastLookPos = { x: t.clientX, y: t.clientY };
             }
         });
         window.addEventListener('touchend', (e) => {
@@ -157,40 +141,45 @@
             }
         });
 
+        // ボタンイベント
+        document.getElementById('build-btn').onclick = (e) => { e.stopPropagation(); isBuildMode = !isBuildMode; ghost.visible = isBuildMode; document.getElementById('place-btn').style.display = document.getElementById('type-btn').style.display = isBuildMode ? 'block' : 'none'; };
+        document.getElementById('type-btn').onclick = (e) => { e.stopPropagation(); currentTypeIdx = (currentTypeIdx + 1) % wallTypes.length; e.target.innerText = `TYPE: ${wallTypes[currentTypeIdx].name}`; };
+        document.getElementById('place-btn').onclick = (e) => { e.stopPropagation(); if(isBuildMode) createWall(ghost.position.clone(), ghost.rotation.y, currentTypeIdx); };
+        document.getElementById('action-btn').onclick = (e) => {
+            e.stopPropagation();
+            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
+            const hit = shutters.find(s => ray.ray.distanceToPoint(s.mesh.position) < 3);
+            if (hit && !hit.isMoving) { hit.isOpen = !hit.isOpen; hit.targetY = hit.isOpen ? hit.initialY + 3.8 : hit.initialY; hit.isMoving = true; }
+        };
+
         function animate() {
             requestAnimationFrame(animate);
-            // 移動と衝突判定
             if (moveVec.x !== 0 || moveVec.z !== 0) {
                 const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y = 0; f.normalize();
                 const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
                 const vel = new THREE.Vector3().addScaledVector(f, -moveVec.z).addScaledVector(r, moveVec.x).setLength(0.12);
                 const nextPos = camera.position.clone().add(vel);
-                const playerBox = new THREE.Box3().setFromCenterAndSize(nextPos, new THREE.Vector3(0.6, 1.8, 0.6));
-                if (!colliders.some(c => playerBox.intersectsBox(c.box))) camera.position.copy(nextPos);
+                if (!colliders.some(c => new THREE.Box3().setFromCenterAndSize(nextPos, new THREE.Vector3(0.6, 1.8, 0.6)).intersectsBox(c.box))) camera.position.copy(nextPos);
             }
-            // ★重要：シャッターのアニメーションと「当たり判定」の同期
-            shutters.forEach(s => {
-                if(s.isMoving) {
-                    s.mesh.position.y += (s.targetY - s.mesh.position.y) * 0.1;
-                    // 当たり判定(Box3)を動いたMeshに合わせて更新
-                    s.collider.box.setFromObject(s.mesh);
-                    if(Math.abs(s.targetY - s.mesh.position.y) < 0.01) { 
-                        s.mesh.position.y = s.targetY; 
-                        s.collider.box.setFromObject(s.mesh); // 最後に完璧に合わせる
-                        s.isMoving = false; 
-                    }
-                }
-            });
+            
+            shutters.forEach(s => { if(s.isMoving) { s.mesh.position.y += (s.targetY - s.mesh.position.y) * 0.1; s.collider.box.setFromObject(s.mesh); if(Math.abs(s.targetY - s.mesh.position.y) < 0.01) s.isMoving = false; } });
+            
             if (isBuildMode) {
                 const f = new THREE.Vector3(0,0,-4).applyQuaternion(camera.quaternion);
                 ghost.position.set(Math.round(camera.position.x + f.x), 2, Math.round(camera.position.z + f.z));
                 ghost.rotation.y = Math.round(camera.rotation.y / (Math.PI/2)) * (Math.PI/2);
             }
+
+            // --- 重要：プレイヤーの周囲5x5チャンクを常に生成 ---
+            const cx = Math.round(camera.position.x / CHUNK_SIZE);
+            const cz = Math.round(camera.position.z / CHUNK_SIZE);
+            for(let i = cx - 2; i <= cx + 2; i++) {
+                for(let j = cz - 2; j <= cz + 2; j++) spawnChunk(i, j);
+            }
+
             const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
-            actionBtn.style.display = shutters.some(s => ray.ray.distanceToPoint(s.mesh.position) < 3) ? 'block' : 'none';
+            document.getElementById('action-btn').style.display = shutters.some(s => ray.ray.distanceToPoint(s.mesh.position) < 3) ? 'block' : 'none';
             mainLight.position.copy(camera.position);
-            const cx = Math.round(camera.position.x / 8), cz = Math.round(camera.position.z / 8);
-            for(let i=cx-4; i<=cx+4; i++) for(let j=cz-4; j<=cz+4; j++) spawnChunk(i, j);
             renderer.render(scene, camera);
         }
         animate();
