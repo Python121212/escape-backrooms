@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO</title>
+    <title>Backrooms MMO - A-Sync</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; }
         canvas { display: block; filter: contrast(1.1) brightness(1.2); image-rendering: pixelated; }
@@ -15,7 +15,7 @@
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>SYSTEM: ONLINE<br>ACTION: TAP TO START</div>
+        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>SYSTEM: A-SYNC PROTOCOL<br>ACTION: TAP TO START</div>
     </div>
     <div id="joy-base"><div id="stick"></div></div>
 
@@ -35,7 +35,7 @@
         import { initializeApp } from 'firebase/app';
         import { getDatabase, ref, set, onValue, onChildRemoved, onDisconnect } from 'firebase/database';
 
-        // --- Firebase Config (Your Settings) ---
+        // --- Firebase Config (差し替え済み) ---
         const firebaseConfig = {
             apiKey: "AIzaSyDknkrM78uvtu5BfAYsuJCa-oRB2rfH3HQ",
             authDomain: "backrooms-mmo.firebaseapp.com",
@@ -47,7 +47,12 @@
         };
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
-        const myId = "player_" + Math.random().toString(36).substring(7);
+
+        // IDをタブ内で固定
+        if (!sessionStorage.getItem('backrooms_id')) {
+            sessionStorage.setItem('backrooms_id', "A-SYNC_" + Math.random().toString(36).substring(7));
+        }
+        const myId = sessionStorage.getItem('backrooms_id');
         const myRef = ref(db, 'players/' + myId);
 
         // --- PeerJS & Voice ---
@@ -60,12 +65,12 @@
         const initVoice = async () => {
             try {
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                document.getElementById('status').innerHTML += `<br>MIC: ACTIVE`;
+                document.getElementById('status').innerHTML += `<br>MIC: ONLINE`;
                 peer.on('call', (call) => {
                     call.answer(localStream);
                     call.on('stream', (stream) => addSpatialAudio(call.peer, stream));
                 });
-            } catch (err) { console.warn("Mic blocked"); }
+            } catch (err) { console.warn("Mic error"); }
         };
 
         const addSpatialAudio = (id, stream) => {
@@ -83,7 +88,7 @@
             call.on('stream', (stream) => addSpatialAudio(id, stream));
         };
 
-        // --- 3D Engine ---
+        // --- 3D Scene ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x3a3a00);
         scene.fog = new THREE.Fog(0x3a3a00, 1, 25);
@@ -93,29 +98,54 @@
 
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(0.4); document.body.appendChild(renderer.domElement);
+        renderer.setPixelRatio(window.devicePixelRatio > 1 ? 0.5 : 1);
+        document.body.appendChild(renderer.domElement);
 
         const light = new THREE.PointLight(0xffffff, 4.5, 20); scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
         const colliders = [], chunks = new Map(), otherPlayers = new Map();
 
+        // --- A-Sync Hazmat アバター作成 ---
         function createPlayerModel() {
-            const g = new THREE.Group();
-            const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.4, 0.4), new THREE.MeshLambertMaterial({color: 0xddcc66}));
-            body.position.y = 0.7; g.add(body);
-            const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshLambertMaterial({color: 0x222222}));
-            head.position.y = 1.5; g.add(head);
-            return g;
+            const group = new THREE.Group();
+            const hazmatMat = new THREE.MeshLambertMaterial({ color: 0xcccc55, emissive: 0x222200 });
+            const visorMat = new THREE.MeshPhongMaterial({ color: 0x000000, shininess: 100 });
+            const frameMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.35, 1.0, 8), hazmatMat);
+            body.position.y = 0.8; group.add(body);
+
+            const head = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.45, 8), hazmatMat);
+            head.position.y = 1.45; group.add(head);
+
+            const visorMain = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.35, 0.1), visorMat);
+            visorMain.position.set(0, 1.45, 0.18); group.add(visorMain);
+
+            const visorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.38, 0.1), frameMat);
+            visorFrame.position.set(0, 1.45, 0.17); group.add(visorFrame);
+
+            const armGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.7, 8);
+            const rArm = new THREE.Mesh(armGeo, hazmatMat); rArm.position.set(-0.4, 0.9, 0); rArm.rotation.z = 0.4; group.add(rArm);
+            const lArm = new THREE.Mesh(armGeo, hazmatMat); lArm.position.set(0.4, 0.9, 0); lArm.rotation.z = -0.4; group.add(lArm);
+
+            const legGeo = new THREE.CylinderGeometry(0.12, 0.15, 0.8, 8);
+            const rLeg = new THREE.Mesh(legGeo, hazmatMat); rLeg.position.set(-0.18, 0.4, 0); group.add(rLeg);
+            const lLeg = new THREE.Mesh(legGeo, hazmatMat); lLeg.position.set(0.18, 0.4, 0); group.add(lLeg);
+
+            return group;
         }
 
-        // --- Firebase MMO 同期 (改善版) ---
-        onDisconnect(myRef).remove(); // 切断時に自動削除を予約
-        set(myRef, { x: 0, y: 1.7, z: 0, ry: 0 }); // 初期位置送信
+        // --- Firebase MMO ---
+        onDisconnect(myRef).remove();
+        set(myRef, { x: 0, y: 1.7, z: 0, ry: 0 });
 
         onValue(ref(db, 'players'), (snapshot) => {
             const data = snapshot.val();
-            if(!data) return;
+            if(!data) {
+                otherPlayers.forEach(m => scene.remove(m));
+                otherPlayers.clear(); return;
+            }
             for (let id in data) {
                 if (id === myId) continue;
                 if (!otherPlayers.has(id)) {
