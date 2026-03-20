@@ -2,44 +2,27 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - GLB Avatar</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Backrooms MMO - Animated Lite</title>
     <style>
-        * { box-sizing: border-box; }
-        body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; position: fixed; width: 100vw; height: 100vh; }
-        canvas { display: block; filter: contrast(1.1) brightness(1.1); }
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; position: fixed; width: 100vw; height: 100vh; }
+        canvas { display: block; }
         #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; color: #0f0; font-family: monospace; }
-        .vhs-text { position: absolute; top: 15px; left: 15px; font-size: 11px; text-shadow: 1px 1px #000; }
-        #build-menu { position: absolute; top: 10px; right: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; pointer-events: auto; }
-        .ui-btn { width: 50px; height: 50px; background: rgba(0,255,0,0.1); border: 2px solid #0f0; color: #0f0; font-size: 10px; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
-        .active-btn { background: rgba(0,255,0,0.5); box-shadow: 0 0 10px #0f0; }
-        #jump-btn { position: absolute; bottom: 120px; right: 30px; width: 70px; height: 70px; border-radius: 50%; border: 3px solid #0f0; background: rgba(0,255,0,0.2); color: #0f0; display: flex; align-items: center; justify-content: center; font-weight: bold; pointer-events: auto; z-index: 200; }
-        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid #0f0; border-radius: 50%; background: rgba(0,255,0,0.1); pointer-events: none; }
-        #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; }
-        #crosshair { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: #0f0; border-radius: 50%; margin: -3px; opacity: 0.5; }
+        .vhs-text { position: absolute; top: 15px; left: 15px; font-size: 10px; text-shadow: 1px 1px #000; }
+        #jump-btn { position: absolute; bottom: 40px; right: 20px; width: 60px; height: 60px; border-radius: 50%; border: 2px solid #0f0; background: rgba(0,255,0,0.1); color: #0f0; display: flex; align-items: center; justify-content: center; pointer-events: auto; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>A-SYNC UNIT: INSPECTOR<br>MODEL: CUSTOM GLB</div>
-        <div id="crosshair"></div>
-        <div id="build-menu">
-            <div class="ui-btn" id="btn-wall" onclick="setBuild('wall')">WALL</div>
-            <div class="ui-btn" id="btn-glass" onclick="setBuild('glass')">GLAS</div>
-            <div class="ui-btn" id="btn-shutter" onclick="setBuild('shutter')">SHUT</div>
-            <div class="ui-btn del-btn" id="btn-delete" onclick="setBuild('delete')">DEL</div>
-        </div>
+        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>SYSTEM: OPTIMIZED<br>ANIMATION: ENABLED</div>
         <div id="jump-btn">JUMP</div>
     </div>
-    <div id="joy-base"><div id="stick"></div></div>
 
     <script type="importmap">
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-            "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
-            "firebase/database": "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js"
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
         }
     }
     </script>
@@ -47,203 +30,86 @@
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { initializeApp } from 'firebase/app';
-        import { getDatabase, ref, set, push, remove, onValue, onChildAdded, onChildRemoved, onDisconnect } from 'firebase/database';
 
-        // Firebase設定 (以前と同じ)
-        const firebaseConfig = {
-            apiKey: "AIzaSyDknkrM78uvtu5BfAYsuJCa-oRB2rfH3HQ",
-            authDomain: "backrooms-mmo.firebaseapp.com",
-            databaseURL: "https://backrooms-mmo-default-rtdb.firebaseio.com",
-            projectId: "backrooms-mmo",
-            storageBucket: "backrooms-mmo.firebasestorage.app",
-            messagingSenderId: "64360079618",
-            appId: "1:64360079618:web:240178c335c04cd373621b"
-        };
-        const app = initializeApp(firebaseConfig);
-        const db = getDatabase(app);
-        const myId = "A-SYNC_" + Math.random().toString(36).substring(7);
-        const myRef = ref(db, 'players/' + myId);
-        const buildRef = ref(db, 'builds');
-
+        // シーン設定
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x2a2a00);
-        scene.fog = new THREE.Fog(0x2a2a00, 1, 20);
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
-        camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
+        scene.background = new THREE.Color(0x111100);
+        scene.fog = new THREE.Fog(0x111100, 1, 15);
         
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 30);
+        camera.position.set(0, 1.7, 0);
+
         const renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setPixelRatio(0.8); // 解像度をさらに下げて高速化
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-        const pl = new THREE.PointLight(0xffffff, 10, 15); scene.add(pl);
 
-        const colliders = [], chunks = new Map(), otherPlayers = new Map(), userBuilds = new Map();
+        const light = new THREE.PointLight(0xffffff, 10, 12); scene.add(light);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+        const colliders = [], chunks = new Map(), otherPlayers = new Map();
         const gltfLoader = new GLTFLoader();
 
-        // --- ★アバター作成関数 (GLB読み込み) ---
-        function createPlayerAvatar(callback) {
-            // アップロードされたファイル名を指定
-            gltfLoader.load('class_a_nbc_hazmat.glb', (gltf) => {
-                const model = gltf.scene;
-                
-                // モデルのサイズと向きを調整 (モデルに合わせて数値を微調整してください)
-                model.scale.set(1.0, 1.0, 1.0); 
-                
-                // モデル内の全メッシュに影の設定などを適用
-                model.traverse(n => { if(n.isMesh) n.castShadow = true; });
-
-                const group = new THREE.Group();
-                group.add(model);
-                
-                // アニメーションミキサーの設定
-                const mixer = new THREE.AnimationMixer(model);
-                const clips = gltf.animations;
-                
-                callback(group, mixer, clips);
-            }, undefined, (error) => {
-                console.error("モデルの読み込みに失敗しました:", error);
-            });
-        }
-
-        // --- 迷路・建築 (以前と同じ) ---
+        // 壁の生成（負荷を最小限に）
         function spawn(cx, cz) {
             const k = `${cx},${cz}`; if(chunks.has(k)) return;
             const g = new THREE.Group();
-            g.add(new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x9a8c62})).rotateX(-Math.PI/2));
-            const wMat = new THREE.MeshLambertMaterial({color:0xddcc66});
-            const c = new THREE.Mesh(new THREE.PlaneGeometry(8,8), wMat); c.position.y=4; c.rotateX(Math.PI/2); g.add(c);
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x444422}));
+            floor.rotation.x = -Math.PI/2; g.add(floor);
+            
             if(Math.abs(cx%2)===1 && Math.abs(cz%2)===1) {
-                const p = new THREE.Mesh(new THREE.BoxGeometry(1.5,4,1.5), wMat); p.position.y=2; g.add(p);
-                colliders.push({box: new THREE.Box3().setFromObject(p).translate(new THREE.Vector3(cx*8,0,cz*8))});
+                const p = new THREE.Mesh(new THREE.BoxGeometry(1.2,4,1.2), new THREE.MeshLambertMaterial({color:0x887733}));
+                p.position.y = 2; g.add(p);
+                colliders.push(new THREE.Box3().setFromObject(p).translate(new THREE.Vector3(cx*8,0,cz*8)));
             }
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
         }
 
-        const previewMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }));
-        previewMesh.visible = false; scene.add(previewMesh);
-        let buildType = null;
-        window.setBuild = (type) => {
-            buildType = (buildType === type) ? null : type;
-            document.querySelectorAll('.ui-btn').forEach(b => b.classList.remove('active-btn'));
-            previewMesh.visible = (buildType && buildType !== 'delete');
-            if(buildType) document.getElementById('btn-' + type).classList.add('active-btn');
-        };
+        // --- アニメーション対応モデル読み込み ---
+        function loadModel(id) {
+            gltfLoader.load('class_a_nbc_hazmat.glb', (gltf) => {
+                const model = gltf.scene;
+                model.scale.set(0.9, 0.9, 0.9);
+                
+                // アニメーション設定
+                const mixer = new THREE.AnimationMixer(model);
+                if (gltf.animations.length > 0) {
+                    const action = mixer.clipAction(gltf.animations[0]); // 最初の動きを再生
+                    action.play();
+                }
 
-        function handleAction() {
-            if(buildType === 'delete') {
-                const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(0,0), camera);
-                const hits = ray.intersectObjects(scene.children);
-                const target = hits.find(h => h.object.userData.isBuild);
-                if(target) remove(ref(db, 'builds/' + target.object.userData.dbKey));
-            } else if(buildType) {
-                push(buildRef, { type: buildType, x: previewMesh.position.x, z: previewMesh.position.z, ry: previewMesh.rotation.y });
-            }
+                scene.add(model);
+                otherPlayers.set(id, { model, mixer });
+            });
         }
 
-        // --- プレイヤー同期 ---
-        onValue(ref(db, 'players'), snap => {
-            const d = snap.val(); if(!d) return;
-            for(let id in d) {
-                if(id === myId) continue;
-                if(!otherPlayers.has(id)) {
-                    // 他人のアバターを生成
-                    createPlayerAvatar((group, mixer, clips) => {
-                        scene.add(group);
-                        otherPlayers.set(id, { group, mixer, clips });
-                    });
-                } else {
-                    const pData = otherPlayers.get(id);
-                    if(pData && pData.group) {
-                        pData.group.position.set(d[id].x, d[id].y - 1.7, d[id].z);
-                        pData.group.rotation.y = d[id].ry;
-                        // アニメーションがある場合はここで mixer.update() 等を行う
-                    }
-                }
-            }
-        });
+        // 仮のマルチプレイ用テスト（本来はFirebaseから取得）
+        // loadModel("test_player"); 
 
-        onChildAdded(buildRef, snap => {
-            const d = snap.val(); const m = new THREE.Mesh(new THREE.BoxGeometry(2,4,0.2), new THREE.MeshStandardMaterial({color:0xddcc66}));
-            m.position.set(d.x, 2, d.z); m.rotation.y = d.ry; m.userData = {isBuild:true, dbKey:snap.key};
-            scene.add(m); userBuilds.set(snap.key, m); colliders.push({box: new THREE.Box3().setFromObject(m), key:snap.key});
-        });
-        onChildRemoved(buildRef, snap => {
-            const m = userBuilds.get(snap.key); if(m) scene.remove(m); userBuilds.delete(snap.key);
-            const idx = colliders.findIndex(c => c.key === snap.key); if(idx>-1) colliders.splice(idx, 1);
-        });
-        onDisconnect(myRef).remove();
-
-        // --- 操作系 (以前と同じ) ---
-        let keys = {}, mv = {x:0, z:0}, moveId = null, lookId = null, lastL = {x:0, y:0}, vY = 0, isG = true;
-        const jump = () => { if(isG){ vY = 0.15; isG = false; } };
-        window.addEventListener('keydown', e => { keys[e.code]=true; if(e.code==='Space') jump(); });
-        window.addEventListener('keyup', e => keys[e.code]=false);
-        renderer.domElement.addEventListener('mousedown', () => { if(document.pointerLockElement) handleAction(); else renderer.domElement.requestPointerLock(); });
-        window.addEventListener('mousemove', e => { if(document.pointerLockElement){ camera.rotation.y -= e.movementX*0.003; camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY*0.003)); } });
-        document.getElementById('jump-btn').addEventListener('touchstart', e => { e.preventDefault(); jump(); });
-
-        window.addEventListener('touchstart', e => {
-            for(let t of e.changedTouches) {
-                if(t.clientX < window.innerWidth/2) moveId = t.identifier;
-                else if(!e.target.closest('.ui-btn') && !e.target.closest('#jump-btn')) { if(buildType) handleAction(); lookId = t.identifier; lastL = {x:t.clientX, y:t.clientY}; }
-            }
-        }, {passive:false});
-        window.addEventListener('touchmove', e => {
-            e.preventDefault();
-            for(let t of e.touches) {
-                if(t.identifier === moveId) {
-                    const dx = t.clientX - 80, dy = t.clientY - (window.innerHeight - 80);
-                    const d = Math.min(35, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy, dx);
-                    mv = {x: Math.cos(a)*(d/35), z: Math.sin(a)*(d/35)};
-                    document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
-                } else if(t.identifier === lookId) {
-                    camera.rotation.y -= (t.clientX - lastL.x) * 0.008;
-                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastL.y) * 0.008));
-                    lastL = {x:t.clientX, y:t.clientY};
-                }
-            }
-        }, {passive:false});
-        window.addEventListener('touchend', e => { for(let t of e.changedTouches){ if(t.identifier === moveId){ moveId = null; mv = {x:0, z:0}; document.getElementById('stick').style.transform = 'none'; } if(t.identifier === lookId) lookId = null; } });
+        // 操作
+        let mv = {x:0, z:0}, vY = 0, isG = true;
+        window.addEventListener('touchstart', e => { if(e.touches[0].clientX > window.innerWidth/2) { if(isG){vY=0.15; isG=false;} } });
 
         const clock = new THREE.Clock();
-        let lastSend = 0;
-        function animate(t) {
+        function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
             
+            // 重力
             vY -= 0.008; camera.position.y += vY;
             if(camera.position.y <= 1.7){ camera.position.y = 1.7; vY = 0; isG = true; }
-            
-            let kx = (keys['KeyD']?1:0)-(keys['KeyA']?1:0) || mv.x;
-            let kz = (keys['KeyS']?1:0)-(keys['KeyW']?1:0) || mv.z;
-            if(kx || kz) {
-                const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
-                const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
-                const next = camera.position.clone().addScaledVector(f, -kz*0.13).addScaledVector(r, kx*0.13);
-                if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.6,1.8,0.6)).intersectsBox(c.box))) camera.position.copy(next);
-            }
 
-            if(previewMesh.visible) {
-                const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-                const pos = camera.position.clone().add(dir.multiplyScalar(3));
-                previewMesh.position.set(Math.round(pos.x), 2, Math.round(pos.z));
-                previewMesh.rotation.y = Math.round(camera.rotation.y / (Math.PI/2)) * (Math.PI/2);
-            }
-
+            // 迷路生成
             const cx = Math.round(camera.position.x/8), cz = Math.round(camera.position.z/8);
-            for(let i=-2; i<=2; i++) for(let j=-2; j<=2; j++) spawn(cx+i, cz+j);
-            pl.position.copy(camera.position);
-
-            // 他人のアニメーション更新
+            for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++) spawn(cx+i, cz+j);
+            
+            // アニメーション更新
             otherPlayers.forEach(p => { if(p.mixer) p.mixer.update(delta); });
 
-            if(t - lastSend > 100) { set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y, walking: (kx||kz) }); lastSend = t; }
+            light.position.copy(camera.position);
             renderer.render(scene, camera);
-            document.getElementById('timer').innerText = new Date(t).toISOString().substr(14, 8);
         }
-        animate(0);
-        window.addEventListener('resize', () => { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+        animate();
     </script>
 </body>
 </html>
