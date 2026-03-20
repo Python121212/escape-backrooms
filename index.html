@@ -3,24 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Backrooms MMO - Ultra Lite</title>
+    <title>Backrooms MMO - Ultimate Fixed</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; touch-action: none; position: fixed; width: 100vw; height: 100vh; }
-        canvas { display: block; }
-        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; color: #0f0; font-family: monospace; }
+        * { box-sizing: border-box; }
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; position: fixed; width: 100vw; height: 100vh; font-family: monospace; }
+        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; color: #0f0; }
         #build-menu { position: absolute; top: 10px; right: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; pointer-events: auto; }
         .ui-btn { width: 50px; height: 50px; background: rgba(0,255,0,0.1); border: 2px solid #0f0; color: #0f0; font-size: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .active-btn { background: rgba(0,255,0,0.5); }
         #jump-btn { position: absolute; bottom: 40px; right: 20px; width: 70px; height: 70px; border-radius: 50%; border: 2px solid #0f0; background: rgba(0,255,0,0.2); color: #0f0; display: flex; align-items: center; justify-content: center; pointer-events: auto; }
-        #crosshair { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: #0f0; border-radius: 50%; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: #0f0; border-radius: 50%; margin: -3px; opacity: 0.5; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div style="padding:15px; font-size:10px;">REC ● LITE_MODE<br>MODEL: OPTIMIZED</div>
+        <div style="padding:15px; font-size:10px;">REC ● MULTI_ACTIVE<br>MODE: <span id="mode-text">EXPLORE</span></div>
         <div id="crosshair"></div>
         <div id="build-menu">
-            <div class="ui-btn" onclick="setBuild('wall')">WALL</div>
-            <div class="ui-btn" onclick="setBuild('delete')" style="color:#f00; border-color:#f00;">DEL</div>
+            <div class="ui-btn" id="btn-wall" onclick="setBuild('wall')">WALL</div>
+            <div class="ui-btn" id="btn-glass" onclick="setBuild('glass')">GLAS</div>
+            <div class="ui-btn" id="btn-shutter" onclick="setBuild('shutter')">SHUT</div>
+            <div class="ui-btn" style="border-color:#f00; color:#f00;" onclick="setBuild('delete')">DEL</div>
         </div>
         <div id="jump-btn">JUMP</div>
     </div>
@@ -29,7 +32,9 @@
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+            "firebase/database": "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js"
         }
     }
     </script>
@@ -37,97 +42,128 @@
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { initializeApp } from 'firebase/app';
+        import { getDatabase, ref, set, push, remove, onValue, onChildAdded, onChildRemoved, onDisconnect } from 'firebase/database';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDknkrM78uvtu5BfAYsuJCa-oRB2rfH3HQ",
+            databaseURL: "https://backrooms-mmo-default-rtdb.firebaseio.com",
+            projectId: "backrooms-mmo"
+        };
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const myId = "A_" + Math.random().toString(36).substring(7);
+        const myRef = ref(db, 'players/' + myId);
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a00);
-        scene.fog = new THREE.Fog(0x1a1a00, 1, 12);
+        scene.fog = new THREE.Fog(0x1a1a00, 1, 15);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
+        camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
         
-        const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 30);
-        camera.position.set(0, 1.7, 0);
-        camera.rotation.order = 'YXZ';
-
-        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
-        renderer.setPixelRatio(0.7); // 解像度を落として負荷を半分にする
+        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setPixelRatio(0.8);
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
+        scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-        // ライトを最小限に
-        const light = new THREE.AmbientLight(0xffffff, 1.5); scene.add(light);
-
-        const colliders = [], chunks = new Map(), otherPlayers = new Map();
+        const colliders = [], chunks = new Map(), otherPlayers = new Map(), userBuilds = new Map();
         const gltfLoader = new GLTFLoader();
 
-        // 壁の生成（描画を高速化）
-        const wallMat = new THREE.MeshLambertMaterial({color: 0x887733});
+        // 迷路の自動生成
         function spawn(cx, cz) {
             const k = `${cx},${cz}`; if(chunks.has(k)) return;
             const g = new THREE.Group();
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x444422}));
-            floor.rotation.x = -Math.PI/2; g.add(floor);
-            
+            g.add(new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x8a7c52})).rotateX(-Math.PI/2));
             if(Math.abs(cx%2)===1 && Math.abs(cz%2)===1) {
-                const p = new THREE.Mesh(new THREE.BoxGeometry(1.2,4,1.2), wallMat);
-                p.position.y = 2; g.add(p);
-                colliders.push(new THREE.Box3().setFromObject(p).translate(new THREE.Vector3(cx*8,0,cz*8)));
+                const p = new THREE.Mesh(new THREE.BoxGeometry(1.5,4,1.5), new THREE.MeshLambertMaterial({color:0xddcc66}));
+                p.position.y=2; g.add(p);
+                colliders.push({box: new THREE.Box3().setFromObject(p).translate(new THREE.Vector3(cx*8,0,cz*8))});
             }
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
         }
 
-        // --- プレイヤーモデル読み込み (軽量化設定) ---
-        function loadOtherPlayer(id) {
-            gltfLoader.load('class_a_nbc_hazmat.glb', (gltf) => {
-                const m = gltf.scene; m.scale.set(0.9, 0.9, 0.9);
-                // 内部の質感をすべて軽量なものに置き換える
-                m.traverse(child => {
-                    if (child.isMesh) {
-                        child.material = new THREE.MeshBasicMaterial({ map: child.material.map, color: 0xffffff });
-                    }
-                });
-                const mixer = new THREE.AnimationMixer(m);
-                if(gltf.animations.length > 0) mixer.clipAction(gltf.animations[0]).play();
-                scene.add(m);
-                otherPlayers.set(id, { m, mixer });
-            });
+        // 建築システム
+        const previewMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }));
+        previewMesh.visible = false; scene.add(previewMesh);
+        let buildType = null;
+        window.setBuild = (type) => {
+            buildType = (buildType === type) ? null : type;
+            document.querySelectorAll('.ui-btn').forEach(b => b.classList.remove('active-btn'));
+            previewMesh.visible = (buildType && buildType !== 'delete');
+            if(buildType) document.getElementById('btn-' + type)?.classList.add('active-btn');
+        };
+
+        function handleAction() {
+            if(buildType === 'delete') {
+                const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(0,0), camera);
+                const hits = ray.intersectObjects(scene.children);
+                const target = hits.find(h => h.object.userData.isBuild);
+                if(target) remove(ref(db, 'builds/' + target.object.userData.dbKey));
+            } else if(buildType) {
+                push(ref(db, 'builds'), { type: buildType, x: previewMesh.position.x, z: previewMesh.position.z, ry: previewMesh.rotation.y });
+            }
         }
+
+        // --- 同期システム復旧 ---
+        onValue(ref(db, 'players'), snap => {
+            const d = snap.val(); if(!d) return;
+            for(let id in d) {
+                if(id === myId) continue;
+                if(!otherPlayers.has(id)) {
+                    gltfLoader.load('class_a_nbc_hazmat.glb', (g) => {
+                        const m = g.scene; m.scale.set(0.9, 0.9, 0.9);
+                        const mixer = new THREE.AnimationMixer(m);
+                        if(g.animations.length > 0) mixer.clipAction(g.animations[0]).play();
+                        scene.add(m); otherPlayers.set(id, { m, mixer });
+                    });
+                } else {
+                    const p = otherPlayers.get(id);
+                    if(p && p.m) { p.m.position.set(d[id].x, d[id].y-1.7, d[id].z); p.m.rotation.y = d[id].ry; }
+                }
+            }
+        });
+        onChildAdded(ref(db, 'builds'), snap => {
+            const d = snap.val(); const m = new THREE.Mesh(new THREE.BoxGeometry(2,4,0.2), new THREE.MeshStandardMaterial({color:0xddcc66}));
+            m.position.set(d.x, 2, d.z); m.rotation.y = d.ry; m.userData = {isBuild:true, dbKey:snap.key};
+            scene.add(m); userBuilds.set(snap.key, m); colliders.push({box: new THREE.Box3().setFromObject(m), key:snap.key});
+        });
+        onDisconnect(myRef).remove();
 
         // 操作
         let keys = {}, vY = 0, isG = true;
-        window.addEventListener('keydown', e => keys[e.code]=true);
+        window.addEventListener('keydown', e => { keys[e.code]=true; if(e.code==='Space') vY=0.15; });
         window.addEventListener('keyup', e => keys[e.code]=false);
-        renderer.domElement.addEventListener('mousedown', () => renderer.domElement.requestPointerLock());
-        window.addEventListener('mousemove', e => {
-            if(document.pointerLockElement){
-                camera.rotation.y -= e.movementX*0.003;
-                camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY*0.003));
-            }
-        });
+        renderer.domElement.addEventListener('mousedown', () => { if(document.pointerLockElement) handleAction(); else renderer.domElement.requestPointerLock(); });
+        window.addEventListener('mousemove', e => { if(document.pointerLockElement){ camera.rotation.y -= e.movementX*0.003; camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY*0.003)); } });
         document.getElementById('jump-btn').onclick = () => { if(isG){vY=0.15; isG=false;} };
 
         const clock = new THREE.Clock();
-        function animate() {
+        let lastSend = 0;
+        function animate(t) {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
-            
-            // 重力と移動
             vY -= 0.008; camera.position.y += vY;
             if(camera.position.y <= 1.7){ camera.position.y = 1.7; vY = 0; isG = true; }
 
-            const speed = 0.12;
             let kx = (keys['KeyD']?1:0)-(keys['KeyA']?1:0), kz = (keys['KeyS']?1:0)-(keys['KeyW']?1:0);
             if(kx || kz) {
-                const dir = new THREE.Vector3(kx, 0, kz).applyQuaternion(camera.quaternion);
-                dir.y = 0; dir.normalize();
-                const next = camera.position.clone().addScaledVector(dir, speed);
-                if(!colliders.some(c => next.distanceTo(c.getCenter(new THREE.Vector3())) < 1.5)) camera.position.copy(next);
+                const dir = new THREE.Vector3(kx, 0, kz).applyQuaternion(camera.quaternion); dir.y = 0; dir.normalize();
+                const next = camera.position.clone().addScaledVector(dir, 0.12);
+                if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.6,1.8,0.6)).intersectsBox(c.box))) camera.position.copy(next);
             }
-
+            if(previewMesh.visible) {
+                const pos = camera.position.clone().add(new THREE.Vector3(0,0,-3).applyQuaternion(camera.quaternion));
+                previewMesh.position.set(Math.round(pos.x), 2, Math.round(pos.z));
+                previewMesh.rotation.y = Math.round(camera.rotation.y / (Math.PI/2)) * (Math.PI/2);
+            }
             const cx = Math.round(camera.position.x/8), cz = Math.round(camera.position.z/8);
             for(let i=-1; i<=1; i++) for(let j=-1; j<=1; j++) spawn(cx+i, cz+j);
-            
-            otherPlayers.forEach(p => { if(p.mixer) p.mixer.update(delta); });
+            otherPlayers.forEach(p => p.mixer.update(delta));
             renderer.render(scene, camera);
+            if(t - lastSend > 100) { set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y }); lastSend = t; }
         }
-        animate();
+        animate(0);
     </script>
 </body>
 </html>
