@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - PC Master</title>
+    <title>Backrooms MMO - Smooth & Bob</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; }
         canvas { display: block; filter: contrast(1.1) brightness(1.1); image-rendering: pixelated; }
@@ -88,7 +88,7 @@
         };
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a00); // 少し暗くしてライトを際立たせる
+        scene.background = new THREE.Color(0x1a1a00);
         scene.fog = new THREE.Fog(0x1a1a00, 1, 20);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
         camera.add(listener);
@@ -99,8 +99,7 @@
         renderer.setPixelRatio(window.devicePixelRatio > 1 ? 0.6 : 1);
         document.body.appendChild(renderer.domElement);
 
-        // --- ライティング (懐中電灯) ---
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2); // 全体的に暗く
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
         scene.add(ambientLight);
 
         const flashLight = new THREE.SpotLight(0xffffff, 10, 15, Math.PI/6, 0.5, 1);
@@ -154,12 +153,17 @@
             bp.position.set(0, 0.9, -0.22); container.add(bp);
 
             container.rotation.y = Math.PI;
-            group.userData = { rArmP, lArmP, rLegP, lLegP, walking: false };
+            // 補完用のターゲット位置を保存
+            group.userData = { 
+                rArmP, lArmP, rLegP, lLegP, 
+                targetPos: new THREE.Vector3(), 
+                targetRot: 0, 
+                walking: false 
+            };
             return group;
         }
 
         onDisconnect(myRef).remove();
-        set(myRef, { x: 0, y: 1.7, z: 0, ry: 0, walking: false });
 
         onValue(ref(db, 'players'), (snapshot) => {
             const data = snapshot.val();
@@ -177,8 +181,9 @@
                 }
                 const m = otherPlayers.get(id);
                 const p = data[id];
-                m.position.set(p.x, p.y - 1.7, p.z);
-                m.rotation.y = p.ry;
+                // ★直接位置を変えず、ターゲットを保存する
+                m.userData.targetPos.set(p.x, p.y - 1.7, p.z);
+                m.userData.targetRot = p.ry;
                 m.userData.walking = p.walking;
             }
         });
@@ -192,22 +197,8 @@
             }
         });
 
-        // --- マウスロック設定 ---
         const canvas = renderer.domElement;
-        canvas.addEventListener('click', () => {
-            canvas.requestPointerLock();
-        });
-
-        document.addEventListener('pointerlockchange', () => {
-            if (document.pointerLockElement === canvas) {
-                document.getElementById('crosshair').style.display = 'block';
-                document.getElementById('joy-base').style.display = 'none';
-                startAll();
-            } else {
-                document.getElementById('crosshair').style.display = 'none';
-                document.getElementById('joy-base').style.display = 'block';
-            }
-        });
+        canvas.addEventListener('click', () => { canvas.requestPointerLock(); });
 
         window.addEventListener('mousemove', (e) => {
             if (document.pointerLockElement === canvas) {
@@ -225,14 +216,7 @@
 
         const bgm = new Audio('./buzz.mp3'); bgm.loop = true;
         let audioStarted = false;
-        const startAll = () => { 
-            if(!audioStarted){ 
-                bgm.play(); audioStarted=true; initVoice(); 
-                if (audioContext.state === 'suspended') audioContext.resume();
-            } 
-        };
-
-        // スマホ操作（そのまま）
+        const startAll = () => { if(!audioStarted){ bgm.play(); audioStarted=true; initVoice(); if (audioContext.state === 'suspended') audioContext.resume(); } };
         window.addEventListener('touchstart', (e) => {
             startAll();
             for(let t of e.changedTouches) {
@@ -280,7 +264,7 @@
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
         }
 
-        let lastSend = 0, lastPos = new THREE.Vector3(), isWalking = false;
+        let lastSend = 0, lastPos = new THREE.Vector3(), isWalking = false, bobTime = 0;
         function animate(t) {
             requestAnimationFrame(animate);
             let kx = 0, kz = 0;
@@ -298,19 +282,29 @@
                 const vel = new THREE.Vector3().addScaledVector(f, -kz || -mv.z).addScaledVector(r, kx || mv.x).setLength(speed);
                 const next = camera.position.clone().add(vel);
                 if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.5,1.5,0.5)).intersectsBox(c.box))) camera.position.copy(next);
-                camera.position.y = 1.7 + Math.sin(t*0.008)*0.02;
 
-                if(t - lastSend > 100 && (camera.position.distanceTo(lastPos) > 0.01)) {
-                    set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y, walking: true });
-                    lastSend = t; lastPos.copy(camera.position);
-                }
-            } else if (t - lastSend > 100 && lastPos.x !== 0) {
-                 set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y, walking: false });
-                 lastPos.set(0,0,0);
+                // ★ヘッドボブ（カメラ揺れ）の計算
+                bobTime += speed * 1.5;
+                camera.position.y = 1.7 + Math.sin(bobTime) * 0.05; // 上下
+                camera.rotation.z = Math.sin(bobTime * 0.5) * 0.01; // わずかな傾き
+            } else {
+                camera.position.y = THREE.MathUtils.lerp(camera.position.y, 1.7, 0.1);
+                camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, 0, 0.1);
             }
 
+            // Firebase送信
+            if(t - lastSend > 80) {
+                set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y, walking: !!isWalking });
+                lastSend = t;
+            }
+
+            // ★他のプレイヤーの補間移動とアニメ
             otherPlayers.forEach((m) => {
                 const u = m.userData;
+                // 位置を0.1ずつ近づける（なめらか！）
+                m.position.lerp(u.targetPos, 0.15);
+                m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, u.targetRot, 0.15);
+
                 if(u.walking) {
                     const speed = 0.01;
                     u.rLegP.rotation.x = Math.sin(t * speed) * 0.5;
