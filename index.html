@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - A-Sync Fixed</title>
+    <title>Backrooms MMO - A-Sync Animated</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; }
         canvas { display: block; filter: contrast(1.1) brightness(1.1); image-rendering: pixelated; }
@@ -102,16 +102,19 @@
 
         const colliders = [], chunks = new Map(), otherPlayers = new Map();
 
-        // --- 改良版 A-Sync Hazmat アバター (肩関節固定) ---
+        // --- アバター作成 (向き修正＋アニメ用パーツ保持) ---
         function createPlayerModel() {
             const group = new THREE.Group();
+            const container = new THREE.Group(); // 向き反転用のコンテナ
+            group.add(container);
+
             const hazmatMat = new THREE.MeshLambertMaterial({ color: 0xcccc55, emissive: 0x222200 });
             const visorMat = new THREE.MeshPhongMaterial({ color: 0x000000, shininess: 120 });
             const frameMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
 
             // 胴体
             const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 1.0, 10), hazmatMat);
-            body.position.y = 0.8; group.add(body);
+            body.position.y = 0.8; container.add(body);
 
             // 頭部
             const headGrp = new THREE.Group();
@@ -122,37 +125,42 @@
             vFrame.position.set(0, 0, 0.17); headGrp.add(vFrame);
             const vMain = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.35, 0.1), visorMat);
             vMain.position.set(0, 0, 0.18); headGrp.add(vMain);
-            group.add(headGrp);
+            container.add(headGrp);
 
-            // 右腕 (ピボット構造)
-            const rArmPivot = new THREE.Group();
-            rArmPivot.position.set(-0.32, 1.25, 0); 
-            const rArm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.7, 8), hazmatMat);
-            rArm.position.y = -0.3; rArmPivot.add(rArm);
-            rArmPivot.rotation.z = 0.35; group.add(rArmPivot);
+            // 右腕
+            const rArmP = new THREE.Group(); rArmP.position.set(-0.35, 1.3, 0); 
+            const rArm = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.7, 8), hazmatMat);
+            rArm.position.y = -0.35; rArmP.add(rArm); container.add(rArmP);
 
-            // 左腕 (ピボット構造)
-            const lArmPivot = new THREE.Group();
-            lArmPivot.position.set(0.32, 1.25, 0);
-            const lArm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.7, 8), hazmatMat);
-            lArm.position.y = -0.3; lArmPivot.add(lArm);
-            lArmPivot.rotation.z = -0.35; group.add(lArmPivot);
+            // 左腕
+            const lArmP = new THREE.Group(); lArmP.position.set(0.35, 1.3, 0);
+            const lArm = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.7, 8), hazmatMat);
+            lArm.position.y = -0.35; lArmP.add(lArm); container.add(lArmP);
 
-            // 脚
-            const rLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.8, 8), hazmatMat);
-            rLeg.position.set(-0.16, 0.4, 0); group.add(rLeg);
-            const lLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.8, 8), hazmatMat);
-            lLeg.position.set(0.16, 0.4, 0); group.add(lLeg);
+            // 右脚
+            const rLegP = new THREE.Group(); rLegP.position.set(-0.16, 0.7, 0);
+            const rLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.7, 8), hazmatMat);
+            rLeg.position.y = -0.35; rLegP.add(rLeg); container.add(rLegP);
+
+            // 左脚
+            const lLegP = new THREE.Group(); lLegP.position.set(0.16, 0.7, 0);
+            const lLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.7, 8), hazmatMat);
+            lLeg.position.y = -0.35; lLegP.add(lLeg); container.add(lLegP);
 
             // 背負い箱
             const bp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.65, 0.22), hazmatMat);
-            bp.position.set(0, 0.9, -0.22); group.add(bp);
+            bp.position.set(0, 0.9, -0.22); container.add(bp);
 
+            // ★向きを180度反転させて正面を合わせる
+            container.rotation.y = Math.PI;
+
+            // アニメーション用にパーツを参照可能にする
+            group.userData = { rArmP, lArmP, rLegP, lLegP, walking: false };
             return group;
         }
 
         onDisconnect(myRef).remove();
-        set(myRef, { x: 0, y: 1.7, z: 0, ry: 0 });
+        set(myRef, { x: 0, y: 1.7, z: 0, ry: 0, walking: false });
 
         onValue(ref(db, 'players'), (snapshot) => {
             const data = snapshot.val();
@@ -172,6 +180,7 @@
                 const p = data[id];
                 m.position.set(p.x, p.y - 1.7, p.z);
                 m.rotation.y = p.ry;
+                m.userData.walking = p.walking; // 歩行フラグ同期
             }
         });
 
@@ -258,7 +267,7 @@
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
         }
 
-        let lastSend = 0, lastPos = new THREE.Vector3();
+        let lastSend = 0, lastPos = new THREE.Vector3(), isWalking = false;
         function animate(t) {
             requestAnimationFrame(animate);
             let kx = 0, kz = 0;
@@ -267,7 +276,9 @@
             if(keys['KeyA'] || keys['ArrowLeft']) kx -= 1;
             if(keys['KeyD'] || keys['ArrowRight']) kx += 1;
 
-            if(kx || kz || mv.x || mv.z) {
+            isWalking = (kx || kz || mv.x || mv.z);
+
+            if(isWalking) {
                 const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
                 const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
                 const speed = keys['ShiftLeft'] ? 0.22 : 0.13;
@@ -276,11 +287,32 @@
                 if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.5,1.5,0.5)).intersectsBox(c.box))) camera.position.copy(next);
                 camera.position.y = 1.7 + Math.sin(t*0.008)*0.02;
 
-                if(t - lastSend > 100 && camera.position.distanceTo(lastPos) > 0.01) {
-                    set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y });
+                if(t - lastSend > 100 && (camera.position.distanceTo(lastPos) > 0.01)) {
+                    set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y, walking: !!isWalking });
                     lastSend = t; lastPos.copy(camera.position);
                 }
+            } else if (t - lastSend > 100 && lastPos.x !== 0) {
+                 // 停止時も一回送る
+                 set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y, walking: false });
+                 lastPos.set(0,0,0);
             }
+
+            // --- アニメーション計算 ---
+            otherPlayers.forEach((m) => {
+                const u = m.userData;
+                if(u.walking) {
+                    const speed = 0.01;
+                    u.rLegP.rotation.x = Math.sin(t * speed) * 0.5;
+                    u.lLegP.rotation.x = -Math.sin(t * speed) * 0.5;
+                    u.rArmP.rotation.x = -Math.sin(t * speed) * 0.4;
+                    u.lArmP.rotation.x = Math.sin(t * speed) * 0.4;
+                } else {
+                    // 停止時はスッと戻す
+                    u.rLegP.rotation.x *= 0.8; u.lLegP.rotation.x *= 0.8;
+                    u.rArmP.rotation.x *= 0.8; u.lArmP.rotation.x *= 0.8;
+                }
+            });
+
             const cx=Math.round(camera.position.x/8), cz=Math.round(camera.position.z/8);
             for(let i=cx-2; i<=cx+2; i++) for(let j=cz-2; j<=cz+2; j++) spawn(i,j);
             light.position.copy(camera.position);
