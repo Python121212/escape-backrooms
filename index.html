@@ -3,33 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - Controls Fixed</title>
+    <title>Backrooms MMO - Multiplayer Sync Fix</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; position: fixed; width: 100%; height: 100%; }
-        canvas { display: block; filter: contrast(1.1) brightness(1.1); cursor: crosshair; }
+        canvas { display: block; filter: contrast(1.1) brightness(1.1); }
         #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; }
-        .vhs-text { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; font-size: 11px; text-shadow: 1px 1px #000; line-height: 1.4; }
-        #build-menu { position: absolute; bottom: 20px; right: 20px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; pointer-events: auto; z-index: 200; width: 140px; }
-        .build-btn { width: 60px; height: 60px; background: rgba(0,255,0,0.1); border: 2px solid #0f0; color: #0f0; font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-align: center; }
-        .active-btn { background: rgba(0,255,0,0.5); box-shadow: 0 0 10px #0f0; }
-        .del-btn { border-color: #f00; color: #f00; background: rgba(255,0,0,0.1); }
-        .del-btn.active-btn { background: rgba(255,0,0,0.5); box-shadow: 0 0 10px #f00; }
-        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); pointer-events: auto; z-index: 200; display: none; }
+        .vhs-text { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; font-size: 11px; text-shadow: 1px 1px #000; }
+        #build-menu { position: absolute; bottom: 20px; right: 20px; display: flex; gap: 8px; pointer-events: auto; z-index: 200; }
+        .build-btn { width: 50px; height: 50px; background: rgba(0,255,0,0.1); border: 2px solid #0f0; color: #0f0; font-size: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-align: center; }
+        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); pointer-events: auto; z-index: 200; }
         #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; pointer-events: none; }
-        #crosshair { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: #0f0; border-radius: 50%; margin: -2px; pointer-events: none; }
     </style>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>VOICE: <span id="vc-status" style="color:#f00">OFFLINE</span><br>MODE: <span id="current-item">EXPLORE</span></div>
-        <div id="crosshair"></div>
-        <div id="build-menu">
-            <div class="build-btn" id="btn-wall" onclick="setBuild('wall')">1:WALL</div>
-            <div class="build-btn" id="btn-glass" onclick="setBuild('glass')">2:GLASS</div>
-            <div class="build-btn" id="btn-shutter" onclick="setBuild('shutter')">3:SHUTTER</div>
-            <div class="build-btn del-btn" id="btn-delete" onclick="setBuild('delete')">DEL</div>
-        </div>
+        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>VOICE: <span id="vc-status">OFFLINE</span><br>PLAYERS: <span id="p-count">1</span></div>
     </div>
     <div id="joy-base"><div id="stick"></div></div>
 
@@ -46,7 +35,7 @@
     <script type="module">
         import * as THREE from 'three';
         import { initializeApp } from 'firebase/app';
-        import { getDatabase, ref, set, push, remove, onValue, onChildAdded, onChildRemoved, onDisconnect } from 'firebase/database';
+        import { getDatabase, ref, set, push, onValue, onChildAdded, onChildRemoved, onDisconnect } from 'firebase/database';
 
         const firebaseConfig = {
             apiKey: "AIzaSyDknkrM78uvtu5BfAYsuJCa-oRB2rfH3HQ",
@@ -59,178 +48,99 @@
         };
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
-        const myId = sessionStorage.getItem('backrooms_id') || "AS_" + Math.random().toString(36).substring(2, 8);
-        sessionStorage.setItem('backrooms_id', myId);
+        const myId = "P_" + Math.random().toString(36).substring(2, 7);
         const myRef = ref(db, 'players/' + myId);
-        const buildRef = ref(db, 'builds');
+        const playersRef = ref(db, 'players');
 
-        // --- Voice Chat ---
-        const peer = new Peer(myId);
-        let myStream; const remoteAudios = {};
-        navigator.mediaDevices.getUserMedia({ audio: true }).then(s => { myStream = s; document.getElementById('vc-status').innerText = "ONLINE"; document.getElementById('vc-status').style.color = "#0f0"; }).catch(() => {});
-        peer.on('call', call => { call.answer(myStream); call.on('stream', s => { if(!remoteAudios[call.peer]){ const a = new Audio(); a.srcObject = s; a.play(); remoteAudios[call.peer] = a; } }); });
-
-        // --- Engine ---
-        const scene = new THREE.Scene(); scene.background = new THREE.Color(0x1a1a00); scene.fog = new THREE.Fog(0x1a1a00, 1, 18);
+        // Scene
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a00);
+        scene.fog = new THREE.Fog(0x1a1a00, 1, 18);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
         camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
-        const flashLight = new THREE.SpotLight(0xffffff, 12, 16, Math.PI/6, 0.5, 1);
-        camera.add(flashLight); flashLight.target.position.set(0,0,-1); camera.add(flashLight.target);
-        scene.add(camera); scene.add(new THREE.AmbientLight(0xffffff, 0.15));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.2));
 
-        const colliders = [], chunks = new Map(), otherPlayers = new Map(), userBuilds = new Map();
-        const mats = { wall: new THREE.MeshLambertMaterial({ color: 0xddcc66 }), glass: new THREE.MeshLambertMaterial({ color: 0x88aabb, transparent: true, opacity: 0.3 }), shutter: new THREE.MeshLambertMaterial({ color: 0x666666, side: THREE.DoubleSide }) };
+        const otherPlayers = new Map();
+        const hazmatMat = new THREE.MeshLambertMaterial({ color: 0xcccc55 });
 
-        // --- Build Logic ---
-        const previewMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true, transparent: true, opacity: 0.5 }));
-        previewMesh.visible = false; scene.add(previewMesh);
-        let buildType = null;
-
-        window.setBuild = (type) => {
-            buildType = (buildType === type) ? null : type;
-            document.getElementById('current-item').innerText = buildType ? buildType.toUpperCase() : "EXPLORE";
-            document.querySelectorAll('.build-btn').forEach(b => b.classList.remove('active-btn'));
-            previewMesh.visible = (buildType && buildType !== 'delete');
-            if(buildType) document.getElementById('btn-' + type).classList.add('active-btn');
-        };
-
-        const raycaster = new THREE.Raycaster();
-        function handleAction() {
-            if(buildType === 'delete') {
-                raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
-                const hits = raycaster.intersectObjects(scene.children);
-                const target = hits.find(h => h.object.userData.isBuild);
-                if(target) remove(ref(db, 'builds/' + target.object.userData.dbKey));
-            } else if(buildType) {
-                push(buildRef, { type: buildType, x: previewMesh.position.x, z: previewMesh.position.z, ry: previewMesh.rotation.y });
-            }
+        // アバター作成
+        function createAvatar() {
+            const g = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 1, 8), hazmatMat); body.position.y = 0.8; g.add(body);
+            const head = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.4, 8), hazmatMat); head.position.y = 1.45; g.add(head);
+            g.userData = { targetPos: new THREE.Vector3(), targetRot: 0 };
+            return g;
         }
 
-        onChildAdded(buildRef, (snap) => {
-            const data = snap.val(); const m = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), mats[data.type] || mats.wall);
-            m.position.set(data.x, 2, data.z); m.rotation.y = data.ry; m.userData.isBuild = true; m.userData.dbKey = snap.key;
-            scene.add(m); userBuilds.set(snap.key, m); colliders.push({ box: new THREE.Box3().setFromObject(m), key: snap.key });
+        // --- Firebase 同期コア ---
+        onValue(playersRef, (snap) => {
+            const data = snap.val(); if(!data) return;
+            document.getElementById('p-count').innerText = Object.keys(data).length;
+            
+            for(let id in data) {
+                if(id === myId) continue;
+                if(!otherPlayers.has(id)) {
+                    const model = createAvatar();
+                    scene.add(model);
+                    otherPlayers.set(id, model);
+                }
+                const m = otherPlayers.get(id);
+                m.userData.targetPos.set(data[id].x, data[id].y - 1.7, data[id].z);
+                m.userData.targetRot = data[id].ry;
+            }
         });
-        onChildRemoved(buildRef, (snap) => { const m = userBuilds.get(snap.key); if(m){ scene.remove(m); userBuilds.delete(snap.key); } const idx = colliders.findIndex(c => c.key === snap.key); if(idx > -1) colliders.splice(idx, 1); });
 
-        // --- Controls (PC & Mobile Unified) ---
-        let keys = {}, moveId = null, lookId = null, lastL = {x:0, y:0}, mv = {x:0, z:0};
-        const isMobile = ('ontouchstart' in window);
-        if(isMobile) document.getElementById('joy-base').style.display = 'block';
+        onChildRemoved(playersRef, (snap) => {
+            const m = otherPlayers.get(snap.key);
+            if(m) { scene.remove(m); otherPlayers.delete(snap.key); }
+        });
 
-        window.addEventListener('keydown', (e) => keys[e.code] = true);
-        window.addEventListener('keyup', (e) => keys[e.code] = false);
+        onDisconnect(myRef).remove();
 
-        // PC 視点移動
-        window.addEventListener('mousemove', (e) => {
-            if (document.pointerLockElement === renderer.domElement) {
+        // --- 操作系 (PC/スマホ統合) ---
+        let keys = {}, mv = {x:0, z:0}, moveId = null;
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        renderer.domElement.addEventListener('mousedown', () => renderer.domElement.requestPointerLock());
+        window.addEventListener('mousemove', e => {
+            if(document.pointerLockElement === renderer.domElement) {
                 camera.rotation.y -= e.movementX * 0.002;
                 camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY * 0.002));
             }
         });
 
-        // PC クリック・建築
-        renderer.domElement.addEventListener('mousedown', () => {
-            if (document.pointerLockElement === renderer.domElement) {
-                if(buildType) handleAction();
-            } else {
-                renderer.domElement.requestPointerLock();
-            }
-        });
-
-        // スマホ タッチ操作
-        window.addEventListener('touchstart', (e) => {
-            for(let t of e.changedTouches) {
-                const r = document.getElementById('joy-base').getBoundingClientRect();
-                if(t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) moveId = t.identifier;
-                else if(!e.target.classList.contains('build-btn')) {
-                    if(buildType) handleAction();
-                    if(lookId === null) { lookId = t.identifier; lastL = {x:t.clientX, y:t.clientY}; }
-                }
-            }
-        }, {passive:false});
-
-        window.addEventListener('touchmove', (e) => {
-            e.preventDefault();
-            for(let t of e.touches) {
-                if(t.identifier === moveId) {
-                    const r = document.getElementById('joy-base').getBoundingClientRect(), dx = t.clientX-(r.left+40), dy = t.clientY-(r.top+40);
-                    const d = Math.min(35, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy, dx);
-                    mv = {x:Math.cos(a)*(d/35), z:Math.sin(a)*(d/35)};
-                    document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
-                } else if(t.identifier === lookId) {
-                    camera.rotation.y -= (t.clientX - lastL.x) * 0.007;
-                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastL.y) * 0.007));
-                    lastL = {x:t.clientX, y:t.clientY};
-                }
-            }
-        }, {passive:false});
-
-        window.addEventListener('touchend', (e) => {
-            for(let t of e.changedTouches) {
-                if(t.identifier === moveId) { moveId = null; mv = {x:0, z:0}; document.getElementById('stick').style.transform = 'none'; }
-                if(t.identifier === lookId) lookId = null;
-            }
-        });
-
-        // --- Maze Logic (Walls Only) ---
-        function spawn(cx, cz) {
-            if(chunks.has(`${cx},${cz}`)) return;
-            const g = new THREE.Group();
-            const f = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x9a8c62})); f.rotation.x=-Math.PI/2; g.add(f);
-            const c = new THREE.Mesh(new THREE.PlaneGeometry(8,8), mats.wall); c.rotation.x=Math.PI/2; c.position.y=4; g.add(c);
-            if(Math.abs(cx%2)===1 && Math.abs(cz%2)===1) {
-                const p = new THREE.Mesh(new THREE.BoxGeometry(1,4,1), mats.wall); p.position.y=2; g.add(p);
-                colliders.push({box: new THREE.Box3().setFromObject(p).translate(new THREE.Vector3(cx*8,0,cz*8))});
-            }
-            if(Math.abs(Math.sin(cx*1.3+cz*0.7)) > 0.85) {
-                const w = new THREE.Mesh(new THREE.BoxGeometry(8,4,0.1), mats.wall); w.position.set(0,2,4); g.add(w);
-                colliders.push({box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*8,0,cz*8))});
-            }
-            g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(`${cx},${cz}`, g);
-        }
-
-        // --- Update Loop ---
-        let velocityY = 0, lastSend = 0;
+        // アニメーション
+        let lastSend = 0;
         function animate(t) {
             requestAnimationFrame(animate);
-            velocityY -= 0.012; camera.position.y += velocityY;
-            if(camera.position.y < 1.7) { camera.position.y = 1.7; velocityY = 0; }
-            if(keys['Space'] && camera.position.y <= 1.71) velocityY = 0.2;
-
-            let kx = (keys['KeyD']?1:0)-(keys['KeyA']?1:0) || mv.x;
-            let kz = (keys['KeyS']?1:0)-(keys['KeyW']?1:0) || mv.z;
+            
+            // 自分の移動
+            let kx = (keys['KeyD']?1:0)-(keys['KeyA']?1:0);
+            let kz = (keys['KeyS']?1:0)-(keys['KeyW']?1:0);
             if(kx || kz) {
                 const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
                 const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
-                const vel = new THREE.Vector3().addScaledVector(f, -kz).addScaledVector(r, kx).setLength(0.12);
-                const next = camera.position.clone().add(vel);
-                if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.6,1.8,0.6)).intersectsBox(c.box))) camera.position.copy(next);
+                camera.position.addScaledVector(f, -kz*0.12).addScaledVector(r, kx*0.12);
             }
 
-            if(buildType && buildType !== 'delete') {
-                const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-                const target = camera.position.clone().add(dir.multiplyScalar(3));
-                previewMesh.position.set(Math.round(target.x), 2, Math.round(target.z));
-                previewMesh.rotation.y = Math.round(camera.rotation.y / (Math.PI/2)) * (Math.PI/2);
-            }
+            // 他人の動きを滑らかに（Lerp）
+            otherPlayers.forEach(m => {
+                m.position.lerp(m.userData.targetPos, 0.2);
+                m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, m.userData.targetRot, 0.2);
+            });
 
+            // Firebaseへ送信 (0.1秒ごと)
             if(t - lastSend > 100) {
-                set(myRef, { x: Math.round(camera.position.x*10)/10, y: camera.position.y, z: Math.round(camera.position.z*10)/10, ry: camera.rotation.y });
+                set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y });
                 lastSend = t;
             }
-            onValue(ref(db, 'players'), snap => {
-                const d = snap.val(); if(!d) return;
-                for(let id in d){ if(id!==myId){ if(!otherPlayers.has(id)){ otherPlayers.set(id, new THREE.Group()); scene.add(otherPlayers.get(id)); } } }
-            });
-            for(let i=-2; i<=2; i++) for(let j=-2; j<=2; j++) spawn(Math.round(camera.position.x/8)+i, Math.round(camera.position.z/8)+j);
+
             renderer.render(scene, camera);
         }
         animate(0);
-        onDisconnect(myRef).remove();
     </script>
 </body>
 </html>
