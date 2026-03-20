@@ -3,46 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - Jump & Mobile Fixed</title>
+    <title>Backrooms MMO - A-Sync Hazmat</title>
     <style>
-        * { box-sizing: border-box; }
-        body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; position: fixed; width: 100vw; height: 100vh; }
-        canvas { display: block; width: 100%; height: 100%; filter: contrast(1.1) brightness(1.1); }
-        
-        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; color: #0f0; font-family: monospace; }
-        .vhs-text { position: absolute; top: 10px; left: 10px; font-size: 11px; text-shadow: 1px 1px #000; }
-        
-        /* 操作系UI */
-        #controls-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; z-index: 150; }
-        
-        #build-menu { position: absolute; top: 10px; right: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; pointer-events: auto; }
-        .ui-btn { width: 50px; height: 50px; background: rgba(0,255,0,0.1); border: 2px solid #0f0; color: #0f0; font-size: 10px; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; pointer-events: auto; }
-        .active-btn { background: rgba(0,255,0,0.5); }
-        .del-btn { border-color: #f00; color: #f00; }
-
-        /* ジャンプボタン */
-        #jump-btn { position: absolute; bottom: 110px; right: 30px; width: 70px; height: 70px; border-radius: 50%; border: 3px solid rgba(0,255,0,0.5); background: rgba(0,255,0,0.1); color: #0f0; display: flex; align-items: center; justify-content: center; font-weight: bold; pointer-events: auto; z-index: 200; }
-        #jump-btn:active { background: rgba(0,255,0,0.4); transform: scale(0.95); }
-
-        /* スティック表示用 */
-        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); pointer-events: none; }
-        #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; }
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; }
+        canvas { display: block; filter: contrast(1.1) brightness(1.1); image-rendering: pixelated; }
+        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; }
+        .vhs-text { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; font-size: 11px; text-shadow: 1px 1px #000; line-height: 1.4; }
+        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); z-index: 1000; pointer-events: auto; }
+        #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; pointer-events: none; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>PLAYERS: <span id="p-count">1</span><br>POS: <span id="pos-display">0, 0</span></div>
-        <div id="build-menu">
-            <div class="ui-btn" id="btn-wall" onclick="setBuild('wall')">WALL</div>
-            <div class="ui-btn" id="btn-glass" onclick="setBuild('glass')">GLAS</div>
-            <div class="ui-btn" id="btn-shutter" onclick="setBuild('shutter')">SHUT</div>
-            <div class="ui-btn del-btn" id="btn-delete" onclick="setBuild('delete')">DEL</div>
-        </div>
-        <div id="jump-btn">JUMP</div>
+        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>SYSTEM: A-SYNC PROTOCOL<br>ACTION: TAP TO START</div>
     </div>
-    
     <div id="joy-base"><div id="stick"></div></div>
 
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script type="importmap">
     {
         "imports": {
@@ -56,7 +33,7 @@
     <script type="module">
         import * as THREE from 'three';
         import { initializeApp } from 'firebase/app';
-        import { getDatabase, ref, set, push, remove, onValue, onChildAdded, onChildRemoved, onDisconnect } from 'firebase/database';
+        import { getDatabase, ref, set, onValue, onChildRemoved, onDisconnect } from 'firebase/database';
 
         const firebaseConfig = {
             apiKey: "AIzaSyDknkrM78uvtu5BfAYsuJCa-oRB2rfH3HQ",
@@ -69,183 +46,249 @@
         };
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
-        const myId = "P_" + Math.random().toString(36).substring(2, 7);
-        const myRef = ref(db, 'players/' + myId);
-        const buildRef = ref(db, 'builds');
 
-        // --- Three.js ---
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a00);
-        scene.fog = new THREE.Fog(0x1a1a00, 1, 15);
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
-        camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
-        const renderer = new THREE.WebGLRenderer({ antialias: false });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.15));
-        const flash = new THREE.SpotLight(0xffffff, 10, 12, Math.PI/6, 0.5, 1);
-        camera.add(flash); flash.target.position.set(0,0,-1); camera.add(flash.target);
-        scene.add(camera);
-
-        const colliders = [], chunks = new Map(), otherPlayers = new Map(), userBuilds = new Map();
-        const mats = { wall: new THREE.MeshLambertMaterial({color: 0xddcc66}), glass: new THREE.MeshLambertMaterial({color: 0x88aabb, transparent:true, opacity:0.3}), shutter: new THREE.MeshLambertMaterial({color: 0x666666, side:THREE.DoubleSide}) };
-
-        // --- Jump Logic ---
-        let velocityY = 0;
-        const gravity = -0.01;
-        const jumpForce = 0.18;
-        let isGrounded = true;
-
-        function doJump() {
-            if(isGrounded) {
-                velocityY = jumpForce;
-                isGrounded = false;
-            }
+        if (!sessionStorage.getItem('backrooms_id')) {
+            sessionStorage.setItem('backrooms_id', "A-SYNC_" + Math.random().toString(36).substring(7));
         }
-        document.getElementById('jump-btn').addEventListener('touchstart', (e) => { e.preventDefault(); doJump(); });
-        document.getElementById('jump-btn').addEventListener('mousedown', (e) => { doJump(); });
+        const myId = sessionStorage.getItem('backrooms_id');
+        const myRef = ref(db, 'players/' + myId);
 
-        // --- Build ---
-        const previewMesh = new THREE.Mesh(new THREE.BoxGeometry(2,4,0.2), new THREE.MeshBasicMaterial({color:0x00ff00, wireframe:true}));
-        previewMesh.visible = false; scene.add(previewMesh);
-        let buildType = null;
+        const peer = new Peer(myId);
+        let localStream;
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const listener = new THREE.AudioListener();
+        const remoteAudios = new Map();
 
-        window.setBuild = (type) => {
-            buildType = (buildType === type) ? null : type;
-            document.querySelectorAll('.ui-btn').forEach(b => b.classList.remove('active-btn'));
-            previewMesh.visible = (buildType && buildType !== 'delete');
-            if(buildType) document.getElementById('btn-' + type).classList.add('active-btn');
+        const initVoice = async () => {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                document.getElementById('status').innerHTML += `<br>MIC: ONLINE`;
+                peer.on('call', (call) => {
+                    call.answer(localStream);
+                    call.on('stream', (stream) => addSpatialAudio(call.peer, stream));
+                });
+            } catch (err) { console.warn("Mic error"); }
         };
 
-        function handleAction() {
-            if(buildType === 'delete') {
-                const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(0,0), camera);
-                const hits = ray.intersectObjects(scene.children);
-                const target = hits.find(h => h.object.userData.isBuild);
-                if(target) remove(ref(db, 'builds/' + target.object.userData.dbKey));
-            } else if(buildType) {
-                push(buildRef, { type: buildType, x: previewMesh.position.x, z: previewMesh.position.z, ry: previewMesh.rotation.y });
-            }
+        const addSpatialAudio = (id, stream) => {
+            if (remoteAudios.has(id)) return;
+            const posAudio = new THREE.PositionalAudio(listener);
+            posAudio.setNodeSource(audioContext.createMediaStreamSource(stream));
+            posAudio.setRefDistance(2); posAudio.setMaxDistance(15);
+            remoteAudios.set(id, posAudio);
+            if (otherPlayers.has(id)) otherPlayers.get(id).add(posAudio);
+        };
+
+        const callPlayer = (id) => {
+            if (!localStream || id === myId) return;
+            const call = peer.call(id, localStream);
+            call.on('stream', (stream) => addSpatialAudio(id, stream));
+        };
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x3a3a00);
+        scene.fog = new THREE.Fog(0x3a3a00, 1, 25);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
+        camera.add(listener);
+        camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
+
+        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio > 1 ? 0.6 : 1);
+        document.body.appendChild(renderer.domElement);
+
+        const light = new THREE.PointLight(0xffffff, 4.5, 20); scene.add(light);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+
+        const colliders = [], chunks = new Map(), otherPlayers = new Map();
+
+        // --- ★全身防護服アバター作成 ---
+        function createPlayerModel() {
+            const group = new THREE.Group();
+
+            // 防護服のマテリアル（Backroomsの光を反射する黄色）
+            const hazmatMat = new THREE.MeshLambertMaterial({ color: 0xeeee00, emissive: 0x333300 });
+            // マスク・バイザーのマテリアル（光沢のある黒）
+            const visorMat = new THREE.MeshPhongMaterial({ color: 0x000000, shininess: 100 });
+
+            // 胴体 (全身スーツの一体感を出すため、滑らかなカプセル形状を使用)
+            const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.7, 4, 8), hazmatMat);
+            body.position.y = 0.85; group.add(body);
+
+            // 頭部（ヘルメット）
+            const headGrp = new THREE.Group();
+            headGrp.position.y = 1.5;
+            const head = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.1, 4, 8), hazmatMat);
+            headGrp.add(head);
+
+            // 防護マスク (画像のバイザー部分。黒い楕円形)
+            const visor = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 10), visorMat);
+            visor.scale.set(1, 1.2, 0.5); // マスクの形状を調整
+            visor.position.set(0, 0, 0.15); // 前方に配置
+            headGrp.add(visor);
+            group.add(headGrp);
+
+            // 右腕
+            const rArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.5, 4, 8), hazmatMat);
+            rArm.position.set(-0.4, 1.1, 0); group.add(rArm);
+
+            // 左腕
+            const lArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.5, 4, 8), hazmatMat);
+            lArm.position.set(0.4, 1.1, 0); group.add(lArm);
+
+            // 右脚
+            const rLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.5, 4, 8), hazmatMat);
+            rLeg.position.set(-0.16, 0.4, 0); group.add(rLeg);
+
+            // 左脚
+            const lLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.5, 4, 8), hazmatMat);
+            lLeg.position.set(0.16, 0.4, 0); group.add(lLeg);
+
+            // 背負い箱 (画像では見えないが、A-Syncの装備として維持)
+            const bpMat = new THREE.MeshLambertMaterial({color: 0xcccccc});
+            const bp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.2), hazmatMat);
+            bp.position.set(0, 0.9, -0.2); group.add(bp);
+
+            return group;
         }
 
-        // --- Sync ---
-        onValue(ref(db, 'players'), (snap) => {
-            const data = snap.val(); if(!data) return;
-            document.getElementById('p-count').innerText = Object.keys(data).length;
-            for(let id in data) {
-                if(id === myId) continue;
-                if(!otherPlayers.has(id)) {
-                    const g = new THREE.Group();
-                    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,1.4), mats.wall); b.position.y=0.7; g.add(b);
-                    scene.add(g); otherPlayers.set(id, g); g.userData = { targetPos: new THREE.Vector3() };
+        onDisconnect(myRef).remove();
+        set(myRef, { x: 0, y: 1.7, z: 0, ry: 0 });
+
+        onValue(ref(db, 'players'), (snapshot) => {
+            const data = snapshot.val();
+            if(!data) {
+                otherPlayers.forEach(m => scene.remove(m));
+                otherPlayers.clear(); return;
+            }
+            for (let id in data) {
+                if (id === myId) continue;
+                if (!otherPlayers.has(id)) {
+                    const model = createPlayerModel();
+                    scene.add(model);
+                    otherPlayers.set(id, model);
+                    setTimeout(() => callPlayer(id), 1500);
                 }
-                otherPlayers.get(id).userData.targetPos.set(data[id].x, data[id].y-1.7, data[id].z);
-                otherPlayers.get(id).rotation.y = data[id].ry;
+                const m = otherPlayers.get(id);
+                const p = data[id];
+                m.position.set(p.x, p.y - 1.7, p.z);
+                m.rotation.y = p.ry;
             }
         });
-        onChildAdded(buildRef, snap => {
-            const d = snap.val(); const m = new THREE.Mesh(new THREE.BoxGeometry(2,4,0.2), mats[d.type]);
-            m.position.set(d.x, 2, d.z); m.rotation.y = d.ry; m.userData.isBuild=true; m.userData.dbKey=snap.key;
-            scene.add(m); userBuilds.set(snap.key, m); colliders.push({box: new THREE.Box3().setFromObject(m), key:snap.key});
-        });
-        onChildRemoved(buildRef, snap => {
-            const m = userBuilds.get(snap.key); if(m) scene.remove(m); userBuilds.delete(snap.key);
-            const idx = colliders.findIndex(c => c.key === snap.key); if(idx>-1) colliders.splice(idx,1);
+
+        onChildRemoved(ref(db, 'players'), (snapshot) => {
+            const id = snapshot.key;
+            if (otherPlayers.has(id)) {
+                scene.remove(otherPlayers.get(id));
+                otherPlayers.delete(id);
+                remoteAudios.delete(id);
+            }
         });
 
-        // --- Mobile Controls (Fixed Multi-touch) ---
-        let mv = {x:0, z:0}, moveId = null, lookId = null, lastL = {x:0, y:0};
-        window.addEventListener('touchstart', e => {
+        let keys = {};
+        window.addEventListener('keydown', (e) => keys[e.code] = true);
+        window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        let mv = {x:0, z:0}, moveId = null, lookId = null, lastL = {x:0, y:0}, isMouseDown = false;
+        const joyBase = document.getElementById('joy-base'), st = document.getElementById('stick');
+
+        const bgm = new Audio('./buzz.mp3'); bgm.loop = true;
+        let audioStarted = false;
+        const startAll = () => { 
+            if(!audioStarted){ 
+                bgm.play(); audioStarted=true; initVoice(); 
+                if (audioContext.state === 'suspended') audioContext.resume();
+            } 
+        };
+        window.addEventListener('mousedown', startAll, true);
+        window.addEventListener('touchstart', startAll, true);
+
+        window.addEventListener('mousemove', (e) => {
+            if(isMouseDown) {
+                camera.rotation.y -= (e.clientX - lastL.x) * 0.003;
+                camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (e.clientY - lastL.y) * 0.003));
+                lastL = { x: e.clientX, y: e.clientY };
+            }
+        });
+        window.addEventListener('mousedown', (e) => { isMouseDown = true; lastL = { x: e.clientX, y: e.clientY }; });
+        window.addEventListener('mouseup', () => isMouseDown = false);
+
+        window.addEventListener('touchstart', (e) => {
             for(let t of e.changedTouches) {
-                if(t.clientX < window.innerWidth / 2 && moveId === null) {
-                    moveId = t.identifier;
-                } else if(lookId === null && !e.target.closest('#build-menu') && !e.target.closest('#jump-btn')) {
-                    if(buildType) handleAction();
-                    lookId = t.identifier; lastL = {x:t.clientX, y:t.clientY};
-                }
+                const r = joyBase.getBoundingClientRect();
+                if(t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) moveId = t.identifier;
+                else if(lookId === null) { lookId = t.identifier; lastL = { x: t.clientX, y: t.clientY }; }
             }
-        }, {passive: false});
+        }, {passive:false});
 
-        window.addEventListener('touchmove', e => {
+        window.addEventListener('touchmove', (e) => {
             e.preventDefault();
             for(let t of e.touches) {
                 if(t.identifier === moveId) {
-                    const dx = t.clientX - 80, dy = t.clientY - (window.innerHeight - 80);
+                    const r = joyBase.getBoundingClientRect();
+                    const dx = t.clientX - (r.left + 40), dy = t.clientY - (r.top + 40);
                     const d = Math.min(35, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy, dx);
-                    mv = {x: Math.cos(a)*(d/35), z: Math.sin(a)*(d/35)};
-                    document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
+                    mv = { x: Math.cos(a) * (d / 35), z: Math.sin(a) * (d / 35) };
+                    st.style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
                 } else if(t.identifier === lookId) {
-                    camera.rotation.y -= (t.clientX - lastL.x) * 0.007;
-                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastL.y) * 0.007));
-                    lastL = {x:t.clientX, y:t.clientY};
+                    camera.rotation.y -= (t.clientX - lastL.x) * 0.008;
+                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastL.y) * 0.008));
+                    lastL = { x: t.clientX, y: t.clientY };
                 }
             }
-        }, {passive: false});
+        }, {passive:false});
 
-        window.addEventListener('touchend', e => {
+        window.addEventListener('touchend', (e) => {
             for(let t of e.changedTouches) {
-                if(t.identifier === moveId) { moveId = null; mv = {x:0, z:0}; document.getElementById('stick').style.transform = 'none'; }
+                if(t.identifier === moveId) { moveId = null; mv = {x:0, z:0}; st.style.transform = 'none'; }
                 if(t.identifier === lookId) lookId = null;
             }
         });
 
-        // PC Controls
-        let keys = {};
-        window.addEventListener('keydown', e => { keys[e.code] = true; if(e.code === 'Space') doJump(); });
-        window.addEventListener('keyup', e => keys[e.code] = false);
-        window.addEventListener('mousemove', e => { if(document.pointerLockElement) { camera.rotation.y -= e.movementX*0.002; camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY*0.002)); } });
-        renderer.domElement.addEventListener('mousedown', () => { if(document.pointerLockElement && buildType) handleAction(); else renderer.domElement.requestPointerLock(); });
-
-        // --- Maze Generator ---
         function spawn(cx, cz) {
-            if(chunks.has(`${cx},${cz}`)) return;
+            const k = `${cx},${cz}`; if(chunks.has(k)) return;
             const g = new THREE.Group();
-            g.add(new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x9a8c62})).rotateX(-Math.PI/2));
-            const c = new THREE.Mesh(new THREE.PlaneGeometry(8,8), mats.wall); c.position.y=4; c.rotateX(Math.PI/2); g.add(c);
-            if(Math.abs(cx%2)===1 && Math.abs(cz%2)===1) {
-                const p = new THREE.Mesh(new THREE.BoxGeometry(1,4,1), mats.wall); p.position.y=2; g.add(p);
-                colliders.push({box: new THREE.Box3().setFromObject(p).translate(new THREE.Vector3(cx*8,0,cz*8))});
+            const f = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x9a8c62})); f.rotation.x=-Math.PI/2; g.add(f);
+            const c = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0xddcc66})); c.rotation.x=Math.PI/2; c.position.y=4; g.add(c);
+            const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.05, 3), new THREE.MeshBasicMaterial({color: 0xffffff}));
+            lamp.position.set(0, 3.97, 0); g.add(lamp);
+            if(Math.abs(Math.sin(cx*1.3+cz*0.7)) > 0.85) {
+                const w = new THREE.Mesh(new THREE.BoxGeometry(8,4,0.3), new THREE.MeshLambertMaterial({color:0xddcc66})); w.position.set(0,2,4); g.add(w);
+                colliders.push({box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*8,0,cz=8))});
             }
-            g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(`${cx},${cz}`, g);
+            g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
         }
 
-        let lastSend = 0;
+        let lastSend = 0, lastPos = new THREE.Vector3();
         function animate(t) {
             requestAnimationFrame(animate);
-            
-            // Physics (Jump & Gravity)
-            velocityY += gravity;
-            camera.position.y += velocityY;
-            if(camera.position.y <= 1.7) {
-                camera.position.y = 1.7;
-                velocityY = 0;
-                isGrounded = true;
+            let kx = 0, kz = 0;
+            if(keys['KeyW'] || keys['ArrowUp']) kz -= 1;
+            if(keys['KeyS'] || keys['ArrowDown']) kz += 1;
+            if(keys['KeyA'] || keys['ArrowLeft']) kx -= 1;
+            if(keys['KeyD'] || keys['ArrowRight']) kx += 1;
+
+            const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
+            const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
+            const speed = keys['ShiftLeft'] ? 0.22 : 0.13;
+            const vel = new THREE.Vector3().addScaledVector(f, -kz || -mv.z).addScaledVector(r, kx || mv.x).setLength(speed);
+            const next = camera.position.clone().add(vel);
+            if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.5,1.5,0.5)).intersectsBox(c.box))) camera.position.copy(next);
+
+            camera.position.y = 1.7 + Math.sin(t*0.008)*0.02;
+
+            if(t - lastSend > 100 && (camera.position.distanceTo(lastPos) > 0.01)) {
+                set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y });
+                lastSend = t; lastPos.copy(camera.position);
             }
 
-            // Move
-            let kx = (keys['KeyD']?1:0)-(keys['KeyA']?1:0) || mv.x;
-            let kz = (keys['KeyS']?1:0)-(keys['KeyW']?1:0) || mv.z;
-            if(kx || kz) {
-                const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
-                const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
-                const next = camera.position.clone().addScaledVector(f, -kz*0.12).addScaledVector(r, kx*0.12);
-                if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.6,1.8,0.6)).intersectsBox(c.box))) camera.position.copy(next);
-            }
-
-            // Other Players Lerp
-            otherPlayers.forEach(m => m.position.lerp(m.userData.targetPos, 0.2));
-
-            if(t - lastSend > 100) { 
-                set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y }); lastSend = t; 
-                document.getElementById('pos-display').innerText = `${Math.round(camera.position.x)}, ${Math.round(camera.position.z)}`;
-            }
-            
-            for(let i=-2; i<=2; i++) for(let j=-2; j<=2; j++) spawn(Math.round(camera.position.x/8)+i, Math.round(camera.position.z/8)+j);
+            const cx=Math.round(camera.position.x/8), cz=Math.round(camera.position.z/8);
+            for(let i=cx-2; i<=cx+2; i++) for(let j=cz-2; j<=cz+2; j++) spawn(i,j);
+            light.position.copy(camera.position);
             renderer.render(scene, camera);
+            document.getElementById('timer').innerText = new Date(t).toISOString().substr(14, 8);
         }
         animate(0);
-        onDisconnect(myRef).remove();
-        window.addEventListener('resize', () => { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
     </script>
 </body>
 </html>
