@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - Save Mode</title>
+    <title>Backrooms MMO - Jump & Gravity</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; }
         canvas { display: block; filter: contrast(1.1) brightness(1.1); image-rendering: pixelated; }
@@ -16,12 +16,11 @@
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>SYSTEM: A-SYNC PROTOCOL<br>BATTERY: OPTIMIZED (SAVE MODE)</div>
+        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>SYSTEM: A-SYNC PROTOCOL<br>ACTION: [SPACE] TO JUMP</div>
         <div id="crosshair"></div>
     </div>
     <div id="joy-base"><div id="stick"></div></div>
 
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script type="importmap">
     {
         "imports": {
@@ -53,7 +52,6 @@
         sessionStorage.setItem('backrooms_id', myId);
         const myRef = ref(db, 'players/' + myId);
 
-        // 3D Scene Setup
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a00);
         scene.fog = new THREE.Fog(0x1a1a00, 1, 20);
@@ -104,7 +102,6 @@
         }
 
         onDisconnect(myRef).remove();
-
         onValue(ref(db, 'players'), (snapshot) => {
             const data = snapshot.val();
             if(!data) return;
@@ -122,7 +119,6 @@
                 m.userData.walking = p.walking;
             }
         });
-
         onChildRemoved(ref(db, 'players'), (snapshot) => {
             const id = snapshot.key;
             if (otherPlayers.has(id)) { scene.remove(otherPlayers.get(id)); otherPlayers.delete(id); }
@@ -145,7 +141,6 @@
                 else if(lookId === null) { lookId = t.identifier; lastL = { x: t.clientX, y: t.clientY }; }
             }
         });
-
         window.addEventListener('touchmove', (e) => {
             e.preventDefault();
             for(let t of e.touches) {
@@ -162,14 +157,12 @@
                 }
             }
         }, {passive:false});
-
         window.addEventListener('touchend', (e) => {
             for(let t of e.changedTouches) {
                 if(t.identifier === moveId) { moveId = null; mv = {x:0, z:0}; st.style.transform = 'none'; }
                 if(t.identifier === lookId) lookId = null;
             }
         });
-
         window.addEventListener('mousemove', (e) => {
             if (document.pointerLockElement === canvas) {
                 camera.rotation.y -= e.movementX * 0.002;
@@ -189,6 +182,12 @@
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
         }
 
+        // 物理パラメーター
+        let velocityY = 0;
+        const gravity = -0.012;
+        const jumpForce = 0.3;
+        const groundY = 1.7;
+
         let lastSend = 0, lastPos = new THREE.Vector3(), lastRot = 0, bobTime = 0;
         function animate(t) {
             requestAnimationFrame(animate);
@@ -198,6 +197,21 @@
 
             const isWalking = (kx || kz || mv.x || mv.z);
 
+            // ジャンプ処理
+            if (keys['Space'] && camera.position.y <= groundY + 0.01) {
+                velocityY = jumpForce;
+            }
+
+            // 重力適用
+            velocityY += gravity;
+            camera.position.y += velocityY;
+
+            // 地面判定
+            if (camera.position.y < groundY) {
+                camera.position.y = groundY;
+                velocityY = 0;
+            }
+
             if(isWalking) {
                 const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
                 const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
@@ -205,16 +219,18 @@
                 const vel = new THREE.Vector3().addScaledVector(f, -kz || -mv.z).addScaledVector(r, kx || mv.x).setLength(speed);
                 const next = camera.position.clone().add(vel);
                 if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.5,1.5,0.5)).intersectsBox(c.box))) camera.position.copy(next);
-                bobTime += speed * 1.5;
-                camera.position.y = 1.7 + Math.sin(bobTime) * 0.05;
-            } else {
-                camera.position.y = THREE.MathUtils.lerp(camera.position.y, 1.7, 0.1);
+                
+                // 歩行中の揺れ（地面にいるときだけ）
+                if (camera.position.y <= groundY + 0.01) {
+                    bobTime += speed * 1.5;
+                    camera.position.y += Math.sin(bobTime) * 0.05;
+                }
             }
 
-            // ★Firebase節約ロジック: 動いた時か1秒おきにしか送らない
+            // Firebase送信 (y座標も含める)
             const dist = camera.position.distanceTo(lastPos);
             const rotDist = Math.abs(camera.rotation.y - lastRot);
-            if(t - lastSend > 100 && (dist > 0.05 || rotDist > 0.05 || (t - lastSend > 1000))) {
+            if(t - lastSend > 100 && (dist > 0.02 || rotDist > 0.05 || (t - lastSend > 1000))) {
                 set(myRef, { 
                     x: Math.round(camera.position.x * 100) / 100, 
                     y: Math.round(camera.position.y * 100) / 100, 
@@ -227,7 +243,7 @@
 
             otherPlayers.forEach((m) => {
                 const u = m.userData;
-                m.position.lerp(u.targetPos, 0.15);
+                m.position.lerp(u.targetPos, 0.2); // y座標も滑らかに補間
                 m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, u.targetRot, 0.15);
                 if(u.walking) {
                     u.rLegP.rotation.x = Math.sin(t * 0.01) * 0.5; u.lLegP.rotation.x = -Math.sin(t * 0.01) * 0.5;
@@ -240,7 +256,6 @@
 
             const cx=Math.round(camera.position.x/8), cz=Math.round(camera.position.z/8);
             for(let i=cx-2; i<=cx+2; i++) for(let j=cz-2; j<=cz+2; j++) spawn(i,j);
-            
             renderer.render(scene, camera);
             document.getElementById('timer').innerText = new Date(t).toISOString().substr(14, 8);
         }
