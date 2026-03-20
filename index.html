@@ -3,21 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - Vercel Ready</title>
+    <title>Backrooms MMO - Controls Fixed</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; position: fixed; width: 100%; height: 100%; }
-        canvas { display: block; filter: contrast(1.1) brightness(1.1); }
+        canvas { display: block; filter: contrast(1.1) brightness(1.1); cursor: crosshair; }
         #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; }
         .vhs-text { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; font-size: 11px; text-shadow: 1px 1px #000; line-height: 1.4; }
-        
-        /* UIメニュー */
         #build-menu { position: absolute; bottom: 20px; right: 20px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; pointer-events: auto; z-index: 200; width: 140px; }
         .build-btn { width: 60px; height: 60px; background: rgba(0,255,0,0.1); border: 2px solid #0f0; color: #0f0; font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; text-align: center; }
         .active-btn { background: rgba(0,255,0,0.5); box-shadow: 0 0 10px #0f0; }
         .del-btn { border-color: #f00; color: #f00; background: rgba(255,0,0,0.1); }
         .del-btn.active-btn { background: rgba(255,0,0,0.5); box-shadow: 0 0 10px #f00; }
-
-        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); pointer-events: auto; z-index: 200; }
+        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); pointer-events: auto; z-index: 200; display: none; }
         #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; pointer-events: none; }
         #crosshair { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: #0f0; border-radius: 50%; margin: -2px; pointer-events: none; }
     </style>
@@ -67,49 +64,25 @@
         const myRef = ref(db, 'players/' + myId);
         const buildRef = ref(db, 'builds');
 
-        // --- Voice Chat (PeerJS) ---
+        // --- Voice Chat ---
         const peer = new Peer(myId);
-        let myStream;
-        const remoteAudios = {};
+        let myStream; const remoteAudios = {};
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(s => { myStream = s; document.getElementById('vc-status').innerText = "ONLINE"; document.getElementById('vc-status').style.color = "#0f0"; }).catch(() => {});
+        peer.on('call', call => { call.answer(myStream); call.on('stream', s => { if(!remoteAudios[call.peer]){ const a = new Audio(); a.srcObject = s; a.play(); remoteAudios[call.peer] = a; } }); });
 
-        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-            myStream = stream;
-            document.getElementById('vc-status').innerText = "ONLINE";
-            document.getElementById('vc-status').style.color = "#0f0";
-        }).catch(() => { document.getElementById('vc-status').innerText = "MIC ERROR"; });
-
-        peer.on('call', call => {
-            call.answer(myStream);
-            call.on('stream', s => playStream(call.peer, s));
-        });
-
-        function playStream(id, s) {
-            if (remoteAudios[id]) return;
-            const a = new Audio(); a.srcObject = s; a.play(); remoteAudios[id] = a;
-        }
-
-        // --- Three.js Engine ---
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a00);
-        scene.fog = new THREE.Fog(0x1a1a00, 1, 18);
+        // --- Engine ---
+        const scene = new THREE.Scene(); scene.background = new THREE.Color(0x1a1a00); scene.fog = new THREE.Fog(0x1a1a00, 1, 18);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
         camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
-
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
         document.body.appendChild(renderer.domElement);
-
         const flashLight = new THREE.SpotLight(0xffffff, 12, 16, Math.PI/6, 0.5, 1);
         camera.add(flashLight); flashLight.target.position.set(0,0,-1); camera.add(flashLight.target);
         scene.add(camera); scene.add(new THREE.AmbientLight(0xffffff, 0.15));
 
         const colliders = [], chunks = new Map(), otherPlayers = new Map(), userBuilds = new Map();
-        const mats = {
-            wall: new THREE.MeshLambertMaterial({ color: 0xddcc66 }),
-            glass: new THREE.MeshLambertMaterial({ color: 0x88aabb, transparent: true, opacity: 0.3 }),
-            shutter: new THREE.MeshLambertMaterial({ color: 0x666666, side: THREE.DoubleSide })
-        };
+        const mats = { wall: new THREE.MeshLambertMaterial({ color: 0xddcc66 }), glass: new THREE.MeshLambertMaterial({ color: 0x88aabb, transparent: true, opacity: 0.3 }), shutter: new THREE.MeshLambertMaterial({ color: 0x666666, side: THREE.DoubleSide }) };
 
         // --- Build Logic ---
         const previewMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true, transparent: true, opacity: 0.5 }));
@@ -122,48 +95,8 @@
             document.querySelectorAll('.build-btn').forEach(b => b.classList.remove('active-btn'));
             previewMesh.visible = (buildType && buildType !== 'delete');
             if(buildType) document.getElementById('btn-' + type).classList.add('active-btn');
-            if(buildType === 'delete') previewMesh.visible = false;
         };
 
-        // 建築の送受信
-        onChildAdded(buildRef, (snap) => {
-            const data = snap.val();
-            const m = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), mats[data.type] || mats.wall);
-            m.position.set(data.x, 2, data.z); m.rotation.y = data.ry;
-            m.userData.isBuild = true; m.userData.dbKey = snap.key;
-            scene.add(m); userBuilds.set(snap.key, m);
-            colliders.push({ box: new THREE.Box3().setFromObject(m), key: snap.key });
-        });
-        onChildRemoved(buildRef, (snap) => {
-            const m = userBuilds.get(snap.key);
-            if(m) { scene.remove(m); userBuilds.delete(snap.key); }
-            const idx = colliders.findIndex(c => c.key === snap.key);
-            if(idx > -1) colliders.splice(idx, 1);
-        });
-
-        // アバター
-        function createModel() {
-            const g = new THREE.Group();
-            const hazmatMat = new THREE.MeshLambertMaterial({ color: 0xcccc55 });
-            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 1, 8), hazmatMat); body.position.y=0.8; g.add(body);
-            const head = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.4, 8), hazmatMat); head.position.y=1.45; g.add(head);
-            g.userData = { targetPos: new THREE.Vector3(), targetRot: 0 };
-            return g;
-        }
-
-        onValue(ref(db, 'players'), (snap) => {
-            const data = snap.val(); if(!data) return;
-            for(let id in data) {
-                if(id === myId) continue;
-                if(!otherPlayers.has(id)) {
-                    otherPlayers.set(id, createModel()); scene.add(otherPlayers.get(id));
-                    if(myStream) peer.call(id, myStream).on('stream', s => playStream(id, s));
-                }
-                const m = otherPlayers.get(id); m.userData.targetPos.set(data[id].x, data[id].y-1.7, data[id].z); m.userData.targetRot = data[id].ry;
-            }
-        });
-
-        // 建築と削除の実行
         const raycaster = new THREE.Raycaster();
         function handleAction() {
             if(buildType === 'delete') {
@@ -176,12 +109,42 @@
             }
         }
 
-        // 移動とタッチ
-        let moveId = null, lookId = null, lastL = {x:0, y:0}, mv = {x:0, z:0};
-        const joyBase = document.getElementById('joy-base'), st = document.getElementById('stick');
+        onChildAdded(buildRef, (snap) => {
+            const data = snap.val(); const m = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), mats[data.type] || mats.wall);
+            m.position.set(data.x, 2, data.z); m.rotation.y = data.ry; m.userData.isBuild = true; m.userData.dbKey = snap.key;
+            scene.add(m); userBuilds.set(snap.key, m); colliders.push({ box: new THREE.Box3().setFromObject(m), key: snap.key });
+        });
+        onChildRemoved(buildRef, (snap) => { const m = userBuilds.get(snap.key); if(m){ scene.remove(m); userBuilds.delete(snap.key); } const idx = colliders.findIndex(c => c.key === snap.key); if(idx > -1) colliders.splice(idx, 1); });
+
+        // --- Controls (PC & Mobile Unified) ---
+        let keys = {}, moveId = null, lookId = null, lastL = {x:0, y:0}, mv = {x:0, z:0};
+        const isMobile = ('ontouchstart' in window);
+        if(isMobile) document.getElementById('joy-base').style.display = 'block';
+
+        window.addEventListener('keydown', (e) => keys[e.code] = true);
+        window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        // PC 視点移動
+        window.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement === renderer.domElement) {
+                camera.rotation.y -= e.movementX * 0.002;
+                camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY * 0.002));
+            }
+        });
+
+        // PC クリック・建築
+        renderer.domElement.addEventListener('mousedown', () => {
+            if (document.pointerLockElement === renderer.domElement) {
+                if(buildType) handleAction();
+            } else {
+                renderer.domElement.requestPointerLock();
+            }
+        });
+
+        // スマホ タッチ操作
         window.addEventListener('touchstart', (e) => {
             for(let t of e.changedTouches) {
-                const r = joyBase.getBoundingClientRect();
+                const r = document.getElementById('joy-base').getBoundingClientRect();
                 if(t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) moveId = t.identifier;
                 else if(!e.target.classList.contains('build-btn')) {
                     if(buildType) handleAction();
@@ -194,10 +157,10 @@
             e.preventDefault();
             for(let t of e.touches) {
                 if(t.identifier === moveId) {
-                    const r = joyBase.getBoundingClientRect(), dx = t.clientX-(r.left+40), dy = t.clientY-(r.top+40);
+                    const r = document.getElementById('joy-base').getBoundingClientRect(), dx = t.clientX-(r.left+40), dy = t.clientY-(r.top+40);
                     const d = Math.min(35, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy, dx);
                     mv = {x:Math.cos(a)*(d/35), z:Math.sin(a)*(d/35)};
-                    st.style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
+                    document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
                 } else if(t.identifier === lookId) {
                     camera.rotation.y -= (t.clientX - lastL.x) * 0.007;
                     camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastL.y) * 0.007));
@@ -208,12 +171,12 @@
 
         window.addEventListener('touchend', (e) => {
             for(let t of e.changedTouches) {
-                if(t.identifier === moveId) { moveId = null; mv = {x:0, z:0}; st.style.transform = 'none'; }
+                if(t.identifier === moveId) { moveId = null; mv = {x:0, z:0}; document.getElementById('stick').style.transform = 'none'; }
                 if(t.identifier === lookId) lookId = null;
             }
         });
 
-        // 迷宮生成 (壁のみ)
+        // --- Maze Logic (Walls Only) ---
         function spawn(cx, cz) {
             if(chunks.has(`${cx},${cz}`)) return;
             const g = new THREE.Group();
@@ -230,16 +193,20 @@
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(`${cx},${cz}`, g);
         }
 
+        // --- Update Loop ---
         let velocityY = 0, lastSend = 0;
         function animate(t) {
             requestAnimationFrame(animate);
             velocityY -= 0.012; camera.position.y += velocityY;
             if(camera.position.y < 1.7) { camera.position.y = 1.7; velocityY = 0; }
-            
-            if(mv.x || mv.z) {
+            if(keys['Space'] && camera.position.y <= 1.71) velocityY = 0.2;
+
+            let kx = (keys['KeyD']?1:0)-(keys['KeyA']?1:0) || mv.x;
+            let kz = (keys['KeyS']?1:0)-(keys['KeyW']?1:0) || mv.z;
+            if(kx || kz) {
                 const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
                 const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
-                const vel = new THREE.Vector3().addScaledVector(f, -mv.z).addScaledVector(r, mv.x).setLength(0.12);
+                const vel = new THREE.Vector3().addScaledVector(f, -kz).addScaledVector(r, kx).setLength(0.12);
                 const next = camera.position.clone().add(vel);
                 if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.6,1.8,0.6)).intersectsBox(c.box))) camera.position.copy(next);
             }
@@ -254,20 +221,16 @@
             if(t - lastSend > 100) {
                 set(myRef, { x: Math.round(camera.position.x*10)/10, y: camera.position.y, z: Math.round(camera.position.z*10)/10, ry: camera.rotation.y });
                 lastSend = t;
-                otherPlayers.forEach((m, id) => {
-                    const audio = remoteAudios[id];
-                    if(audio) audio.volume = Math.max(0, 1 - (camera.position.distanceTo(m.position)/10));
-                });
             }
-            otherPlayers.forEach(m => { m.position.lerp(m.userData.targetPos, 0.2); m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, m.userData.targetRot, 0.15); });
+            onValue(ref(db, 'players'), snap => {
+                const d = snap.val(); if(!d) return;
+                for(let id in d){ if(id!==myId){ if(!otherPlayers.has(id)){ otherPlayers.set(id, new THREE.Group()); scene.add(otherPlayers.get(id)); } } }
+            });
             for(let i=-2; i<=2; i++) for(let j=-2; j<=2; j++) spawn(Math.round(camera.position.x/8)+i, Math.round(camera.position.z/8)+j);
             renderer.render(scene, camera);
-            document.getElementById('timer').innerText = new Date(t).toISOString().substr(14, 8);
         }
         animate(0);
         onDisconnect(myRef).remove();
-        // PC用クリック
-        window.addEventListener('mousedown', () => { if(document.pointerLockElement && buildType) handleAction(); else if(!window.ontouchstart) renderer.domElement.requestPointerLock(); });
     </script>
 </body>
 </html>
