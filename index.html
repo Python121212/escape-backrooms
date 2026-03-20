@@ -3,23 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - A-Sync Inspector</title>
+    <title>Backrooms MMO - Inspector Build</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; }
-        canvas { display: block; filter: contrast(1.1) brightness(1.1) saturate(1.2); image-rendering: pixelated; }
-        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; }
-        .vhs-text { position: absolute; top: 20px; left: 20px; color: #0f0; font-family: monospace; font-size: 11px; text-shadow: 1px 1px #000; line-height: 1.4; }
-        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); z-index: 1000; pointer-events: auto; }
+        * { box-sizing: border-box; }
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; position: fixed; width: 100vw; height: 100vh; }
+        canvas { display: block; filter: contrast(1.1) brightness(1.1); }
+        
+        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; color: #0f0; font-family: monospace; }
+        .vhs-text { position: absolute; top: 15px; left: 15px; font-size: 11px; text-shadow: 1px 1px #000; }
+        
+        /* 建築メニュー */
+        #build-menu { position: absolute; top: 10px; right: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; pointer-events: auto; }
+        .ui-btn { width: 50px; height: 50px; background: rgba(0,255,0,0.1); border: 2px solid #0f0; color: #0f0; font-size: 10px; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
+        .active-btn { background: rgba(0,255,0,0.5); box-shadow: 0 0 10px #0f0; }
+        .del-btn { border-color: #f00; color: #f00; }
+
+        /* 操作UI */
+        #jump-btn { position: absolute; bottom: 120px; right: 30px; width: 70px; height: 70px; border-radius: 50%; border: 3px solid #0f0; background: rgba(0,255,0,0.2); color: #0f0; display: flex; align-items: center; justify-content: center; font-weight: bold; pointer-events: auto; z-index: 200; }
+        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid #0f0; border-radius: 50%; background: rgba(0,255,0,0.1); pointer-events: none; }
         #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: #0f0; border-radius: 50%; margin: -3px; opacity: 0.5; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text" id="status">REC ● <span id="timer">00:00:00</span><br>SYSTEM: A-SYNC PROTOCOL<br>UNIT: INSPECTOR<br>STATUS: INVESTIGATING...</div>
+        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>A-SYNC UNIT: ACTIVE<br>MODE: <span id="mode-text">EXPLORE</span></div>
+        <div id="crosshair"></div>
+        <div id="build-menu">
+            <div class="ui-btn" id="btn-wall" onclick="setBuild('wall')">WALL</div>
+            <div class="ui-btn" id="btn-glass" onclick="setBuild('glass')">GLAS</div>
+            <div class="ui-btn" id="btn-shutter" onclick="setBuild('shutter')">SHUT</div>
+            <div class="ui-btn del-btn" id="btn-delete" onclick="setBuild('delete')">DEL</div>
+        </div>
+        <div id="jump-btn">JUMP</div>
     </div>
     <div id="joy-base"><div id="stick"></div></div>
 
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script type="importmap">
     {
         "imports": {
@@ -33,7 +52,7 @@
     <script type="module">
         import * as THREE from 'three';
         import { initializeApp } from 'firebase/app';
-        import { getDatabase, ref, set, onValue, onChildRemoved, onDisconnect } from 'firebase/database';
+        import { getDatabase, ref, set, push, remove, onValue, onChildAdded, onChildRemoved, onDisconnect } from 'firebase/database';
 
         const firebaseConfig = {
             apiKey: "AIzaSyDknkrM78uvtu5BfAYsuJCa-oRB2rfH3HQ",
@@ -46,272 +65,182 @@
         };
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
-        if (!sessionStorage.getItem('backrooms_id')) sessionStorage.setItem('backrooms_id', "A-SYNC_" + Math.random().toString(36).substring(7));
-        const myId = sessionStorage.getItem('backrooms_id'), myRef = ref(db, 'players/' + myId);
+        const myId = "A-SYNC_" + Math.random().toString(36).substring(7);
+        const myRef = ref(db, 'players/' + myId);
+        const buildRef = ref(db, 'builds');
 
-        const peer = new Peer(myId);
-        let localStream;
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const listener = new THREE.AudioListener();
-        const remoteAudios = new Map();
-
-        const initVoice = async () => {
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                document.getElementById('status').innerHTML += `<br>MIC: ONLINE`;
-                peer.on('call', call => { call.answer(localStream); call.on('stream', stream => addSpatialAudio(call.peer, stream)); });
-            } catch (err) {}
-        };
-
-        const addSpatialAudio = (id, stream) => {
-            if (remoteAudios.has(id)) return;
-            const posAudio = new THREE.PositionalAudio(listener);
-            posAudio.setNodeSource(audioContext.createMediaStreamSource(stream));
-            posAudio.setRefDistance(2); posAudio.setMaxDistance(15);
-            remoteAudios.set(id, posAudio);
-            if (otherPlayers.has(id)) otherPlayers.get(id).add(posAudio);
-        };
-
-        const callPlayer = (id) => {
-            if (!localStream || id === myId) return;
-            peer.call(id, localStream).on('stream', stream => addSpatialAudio(id, stream));
-        };
-
+        // --- Engine Setup ---
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x3a3a00);
-        scene.fog = new THREE.Fog(0x3a3a00, 1, 25);
+        scene.background = new THREE.Color(0x2a2a00);
+        scene.fog = new THREE.Fog(0x2a2a00, 1, 18);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
-        camera.add(listener); camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
-
+        camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio > 1 ? 0.6 : 1);
         document.body.appendChild(renderer.domElement);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+        const pl = new THREE.PointLight(0xffffff, 5, 12); scene.add(pl);
 
-        const light = new THREE.PointLight(0xffffff, 4.5, 20); scene.add(light);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+        const colliders = [], chunks = new Map(), otherPlayers = new Map(), userBuilds = new Map();
+        const mats = { 
+            wall: new THREE.MeshStandardMaterial({ color: 0xddcc66 }), 
+            glass: new THREE.MeshStandardMaterial({ color: 0x88aabb, transparent: true, opacity: 0.3 }),
+            shutter: new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.8 })
+        };
 
-        const colliders = [], chunks = new Map(), otherPlayers = new Map();
-
-        // --- ★人間らしい防護服アバター＆歩行アニメーション作成 ---
-        function createPlayerModel() {
+        // --- 人型ハズマットスーツ・モデル ---
+        function createHazmat() {
             const group = new THREE.Group();
+            const m = new THREE.MeshStandardMaterial({color: 0xddcc00, roughness: 0.4});
+            const v = new THREE.MeshStandardMaterial({color: 0x050505, metalness: 0.9});
             
-            // 人体の向きを制御するためのコンテナ（進行方向に向ける）
-            const bodyContainer = new THREE.Group();
-            group.add(bodyContainer);
-
-            // 防護服のマテリアル（黄色）
-            const hazmatMat = new THREE.MeshLambertMaterial({ color: 0xeeee00, emissive: 0x333300 });
-            // バイザーのマテリアル（光沢のある黒）
-            const visorMat = new THREE.MeshPhongMaterial({ color: 0x000000, shininess: 100 });
-
-            // 胴体 (人体らしい厚みを持たせる)
-            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 1.0, 8), hazmatMat);
-            body.position.y = 0.8; bodyContainer.add(body);
-
-            // 頭部（ヘルメット）
-            const headGrp = new THREE.Group();
-            headGrp.position.y = 1.45;
-            const head = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.45, 8), hazmatMat);
-            headGrp.add(head);
-
-            // 防護マスク（画像の横長のバイザー。少し厚みを持たせる）
-            const visor = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), visorMat);
-            visor.scale.set(1.1, 1.3, 0.6); // 楕円形に
-            visor.position.set(0, 0, 0.16);
-            headGrp.add(visor);
-            bodyContainer.add(headGrp);
-
-            // 背負い箱 (生命維持装置)
-            const bp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.22), hazmatMat);
-            bp.position.set(0, 0.9, -0.22); bodyContainer.add(bp);
-
-            // 関節で動く腕と脚を作成
-            const limbMat = new THREE.MeshLambertMaterial({ color: 0xeeee00 });
+            const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.7, 4, 8), m); body.position.y=0.85; group.add(body);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 12), m); head.position.y=1.5; group.add(head);
+            const visor = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), v); visor.scale.set(1.1, 0.8, 0.5); visor.position.set(0, 1.52, 0.15); group.add(visor);
             
-            // 右腕（肩関節を基点に動かすため、グループ化）
-            const rArmP = new THREE.Group();
-            rArmP.position.set(-0.35, 1.3, 0); // 肩の位置
-            const rArm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.7, 6), limbMat);
-            rArm.position.y = -0.35; // 腕の長さを調整
-            rArmP.add(rArm); bodyContainer.add(rArmP);
-
-            // 左腕
-            const lArmP = new THREE.Group();
-            lArmP.position.set(0.35, 1.3, 0); 
-            const lArm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.7, 6), limbMat);
-            lArm.position.y = -0.35;
-            lArmP.add(lArm); bodyContainer.add(lArmP);
-
-            // 右脚（股関節を基点）
-            const rLegP = new THREE.Group();
-            rLegP.position.set(-0.16, 0.7, 0); // 股関節の位置
-            const rLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.7, 6), limbMat);
-            rLeg.position.y = -0.35;
-            rLegP.add(rLeg); bodyContainer.add(rLegP);
-
-            // 左脚
-            const lLegP = new THREE.Group();
-            lLegP.position.set(0.16, 0.7, 0);
-            const lLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.7, 6), limbMat);
-            lLeg.position.y = -0.35;
-            lLegP.add(lLeg); bodyContainer.add(lLegP);
-
-            // ★アバターデータに「関節」と「歩行状態」を保存
-            group.userData = { rArmP, lArmP, rLegP, lLegP, targetPos: new THREE.Vector3(), targetRot: 0, walking: false };
+            // 腕と脚（アニメーション用）
+            const rArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.6, 4, 4), m); rArm.position.set(-0.4, 1.1, 0); group.add(rArm);
+            const lArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.6, 4, 4), m); lArm.position.set(0.4, 1.1, 0); group.add(lArm);
+            const rLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.6, 4, 4), m); rLeg.position.set(-0.15, 0.4, 0); group.add(rLeg);
+            const lLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.6, 4, 4), m); lLeg.position.set(0.15, 0.4, 0); group.add(lLeg);
+            
+            group.userData = { rArm, lArm, rLeg, lLeg };
             return group;
         }
 
-        onDisconnect(myRef).remove();
-        set(myRef, { x: 0, y: 1.7, z: 0, ry: 0, walking: false }); // walkingフラグを追加
+        // --- 建築システム ---
+        const previewMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }));
+        previewMesh.visible = false; scene.add(previewMesh);
+        let buildType = null;
 
-        onValue(ref(db, 'players'), (snapshot) => {
-            const data = snapshot.val();
-            if(!data) { otherPlayers.forEach(m => scene.remove(m)); otherPlayers.clear(); return; }
-            for (let id in data) {
-                if (id === myId) continue;
-                if (!otherPlayers.has(id)) {
-                    const model = createPlayerModel(); scene.add(model); otherPlayers.set(id, model);
-                    setTimeout(() => callPlayer(id), 1500);
-                }
-                const m = otherPlayers.get(id); const p = data[id];
-                // 位置と向き（y軸回転）を同期
-                m.userData.targetPos.set(p.x, p.y - 1.7, p.z);
-                m.userData.targetRot = p.ry;
-                // ★歩行状態を同期
-                m.userData.walking = p.walking;
-            }
-        });
-
-        onChildRemoved(ref(db, 'players'), snapshot => {
-            const id = snapshot.key;
-            if (otherPlayers.has(id)) { scene.remove(otherPlayers.get(id)); otherPlayers.delete(id); remoteAudios.delete(id); }
-        });
-
-        let keys = {};
-        window.addEventListener('keydown', e => keys[e.code] = true);
-        window.addEventListener('keyup', e => keys[e.code] = false);
-
-        let mv = {x:0, z:0}, moveId = null, lookId = null, lastL = {x:0, y:0}, isMouseDown = false;
-        const joyBase = document.getElementById('joy-base'), st = document.getElementById('stick');
-
-        const bgm = new Audio('./buzz.mp3'); bgm.loop = true;
-        let audioStarted = false;
-        const startAll = () => { 
-            if(!audioStarted){ bgm.play(); audioStarted=true; initVoice(); if (audioContext.state === 'suspended') audioContext.resume(); } 
+        window.setBuild = (type) => {
+            buildType = (buildType === type) ? null : type;
+            document.querySelectorAll('.ui-btn').forEach(b => b.classList.remove('active-btn'));
+            previewMesh.visible = (buildType && buildType !== 'delete');
+            document.getElementById('mode-text').innerText = buildType ? buildType.toUpperCase() : "EXPLORE";
+            if(buildType) document.getElementById('btn-' + type).classList.add('active-btn');
         };
-        window.addEventListener('mousedown', startAll, true);
-        window.addEventListener('touchstart', startAll, true);
 
-        window.addEventListener('mousemove', e => {
-            if(isMouseDown) {
-                camera.rotation.y -= (e.clientX - lastL.x) * 0.003;
-                camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (e.clientY - lastL.y) * 0.003));
-                lastL = { x: e.clientX, y: e.clientY };
+        function handleAction() {
+            if(buildType === 'delete') {
+                const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(0,0), camera);
+                const hits = ray.intersectObjects(scene.children);
+                const target = hits.find(h => h.object.userData.isBuild);
+                if(target) remove(ref(db, 'builds/' + target.object.userData.dbKey));
+            } else if(buildType) {
+                push(buildRef, { type: buildType, x: previewMesh.position.x, z: previewMesh.position.z, ry: previewMesh.rotation.y });
             }
-        });
-        window.addEventListener('mousedown', e => { isMouseDown = true; lastL = { x: e.clientX, y: e.clientY }; });
-        window.addEventListener('mouseup', () => isMouseDown = false);
+        }
 
-        window.addEventListener('touchstart', e => {
-            for(let t of e.changedTouches) {
-                const r = joyBase.getBoundingClientRect();
-                if(t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) moveId = t.identifier;
-                else if(lookId === null) { lookId = t.identifier; lastL = { x: t.clientX, y: t.clientY }; }
-            }
-        }, {passive:false});
-
-        window.addEventListener('touchmove', e => {
-            e.preventDefault();
-            for(let t of e.touches) {
-                if(t.identifier === moveId) {
-                    const r = joyBase.getBoundingClientRect();
-                    const dx = t.clientX - (r.left + 40), dy = t.clientY - (r.top + 40);
-                    const d = Math.min(35, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy, dx);
-                    mv = { x: Math.cos(a) * (d / 35), z: Math.sin(a) * (d / 35) };
-                    st.style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
-                } else if(t.identifier === lookId) {
-                    camera.rotation.y -= (t.clientX - lastL.x) * 0.008;
-                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastL.y) * 0.008));
-                    lastL = { x: t.clientX, y: t.clientY };
-                }
-            }
-        }, {passive:false});
-
-        window.addEventListener('touchend', e => {
-            for(let t of e.changedTouches) {
-                if(t.identifier === moveId) { moveId = null; mv = {x:0, z:0}; st.style.transform = 'none'; }
-                if(t.identifier === lookId) lookId = null;
-            }
-        });
-
+        // --- Maze Generation ---
         function spawn(cx, cz) {
             const k = `${cx},${cz}`; if(chunks.has(k)) return;
             const g = new THREE.Group();
-            const f = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x9a8c62})); f.rotation.x=-Math.PI/2; g.add(f);
-            const c = new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0xddcc66})); c.rotation.x=Math.PI/2; c.position.y=4; g.add(c);
-            const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.05, 3), new THREE.MeshBasicMaterial({color: 0xffffff})); lamp.position.set(0, 3.97, 0); g.add(lamp);
-            if(Math.abs(Math.sin(cx*1.3+cz*0.7)) > 0.85) {
-                const w = new THREE.Mesh(new THREE.BoxGeometry(8,4,0.3), new THREE.MeshLambertMaterial({color:0xddcc66})); w.position.set(0,2,4); g.add(w);
-                colliders.push({box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*8,0,cz=8))});
+            const wMat = new THREE.MeshLambertMaterial({color:0xddcc66});
+            g.add(new THREE.Mesh(new THREE.PlaneGeometry(8,8), new THREE.MeshLambertMaterial({color:0x9a8c62})).rotateX(-Math.PI/2));
+            const c = new THREE.Mesh(new THREE.PlaneGeometry(8,8), wMat); c.position.y=4; c.rotateX(Math.PI/2); g.add(c);
+            
+            // 柱の生成
+            if(Math.abs(cx%2)===1 && Math.abs(cz%2)===1) {
+                const p = new THREE.Mesh(new THREE.BoxGeometry(1.2,4,1.2), wMat); p.position.y=2; g.add(p);
+                colliders.push({box: new THREE.Box3().setFromObject(p).translate(new THREE.Vector3(cx*8,0,cz*8))});
             }
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
         }
 
-        let lastSend = 0, lastPos = new THREE.Vector3();
+        // --- Firebase Sync ---
+        onValue(ref(db, 'players'), snap => {
+            const d = snap.val(); if(!d) return;
+            for(let id in d) {
+                if(id === myId) continue;
+                if(!otherPlayers.has(id)) { const m = createHazmat(); scene.add(m); otherPlayers.set(id, m); }
+                const m = otherPlayers.get(id); m.position.set(d[id].x, d[id].y-1.7, d[id].z); m.rotation.y = d[id].ry;
+                // アニメーション
+                if(d[id].walking) {
+                    const t = Date.now() * 0.01;
+                    m.userData.rLeg.rotation.x = Math.sin(t)*0.5; m.userData.lLeg.rotation.x = -Math.sin(t)*0.5;
+                }
+            }
+        });
+        onChildAdded(buildRef, snap => {
+            const d = snap.val(); const m = new THREE.Mesh(new THREE.BoxGeometry(2,4,0.2), mats[d.type]||mats.wall);
+            m.position.set(d.x, 2, d.z); m.rotation.y = d.ry; m.userData = {isBuild:true, dbKey:snap.key};
+            scene.add(m); userBuilds.set(snap.key, m); colliders.push({box: new THREE.Box3().setFromObject(m), key:snap.key});
+        });
+        onChildRemoved(buildRef, snap => {
+            const m = userBuilds.get(snap.key); if(m) scene.remove(m); userBuilds.delete(snap.key);
+            const idx = colliders.findIndex(c => c.key === snap.key); if(idx>-1) colliders.splice(idx, 1);
+        });
+        onDisconnect(myRef).remove();
+
+        // --- Controls ---
+        let keys = {}, mv = {x:0, z:0}, moveId = null, lookId = null, lastL = {x:0, y:0}, vY = 0, isG = true;
+        const jump = () => { if(isG){ vY = 0.15; isG = false; } };
+
+        window.addEventListener('keydown', e => { keys[e.code]=true; if(e.code==='Space') jump(); });
+        window.addEventListener('keyup', e => keys[e.code]=false);
+        renderer.domElement.addEventListener('mousedown', () => { if(document.pointerLockElement) handleAction(); else renderer.domElement.requestPointerLock(); });
+        window.addEventListener('mousemove', e => { if(document.pointerLockElement){ camera.rotation.y -= e.movementX*0.003; camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY*0.003)); } });
+
+        document.getElementById('jump-btn').addEventListener('touchstart', e => { e.preventDefault(); jump(); });
+        window.addEventListener('touchstart', e => {
+            for(let t of e.changedTouches) {
+                if(t.clientX < window.innerWidth/2) moveId = t.identifier;
+                else if(!e.target.closest('.ui-btn') && !e.target.closest('#jump-btn')) { if(buildType) handleAction(); lookId = t.identifier; lastL = {x:t.clientX, y:t.clientY}; }
+            }
+        }, {passive:false});
+        window.addEventListener('touchmove', e => {
+            e.preventDefault();
+            for(let t of e.touches) {
+                if(t.identifier === moveId) {
+                    const dx = t.clientX - 80, dy = t.clientY - (window.innerHeight - 80);
+                    const d = Math.min(35, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy, dx);
+                    mv = {x: Math.cos(a)*(d/35), z: Math.sin(a)*(d/35)};
+                    document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
+                } else if(t.identifier === lookId) {
+                    camera.rotation.y -= (t.clientX - lastL.x) * 0.008;
+                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastL.y) * 0.008));
+                    lastL = {x:t.clientX, y:t.clientY};
+                }
+            }
+        }, {passive:false});
+        window.addEventListener('touchend', e => { for(let t of e.changedTouches){ if(t.identifier === moveId){ moveId = null; mv = {x:0, z:0}; document.getElementById('stick').style.transform = 'none'; } if(t.identifier === lookId) lookId = null; } });
+
+        let lastSend = 0;
         function animate(t) {
             requestAnimationFrame(animate);
-            let kx = 0, kz = 0;
-            if(keys['KeyW']) kz -= 1; if(keys['KeyS']) kz += 1;
-            if(keys['KeyA']) kx -= 1; if(keys['KeyD']) kx += 1;
+            vY -= 0.008; camera.position.y += vY;
+            if(camera.position.y <= 1.7){ camera.position.y = 1.7; vY = 0; isG = true; }
 
-            const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
-            const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
-            const speed = keys['ShiftLeft'] ? 0.22 : 0.13;
-            const vel = new THREE.Vector3().addScaledVector(f, -kz || -mv.z).addScaledVector(r, kx || mv.x).setLength(speed);
-            const next = camera.position.clone().add(vel);
-            if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.5,1.5,0.5)).intersectsBox(c.box))) camera.position.copy(next);
+            let kx = (keys['KeyD']?1:0)-(keys['KeyA']?1:0) || mv.x;
+            let kz = (keys['KeyS']?1:0)-(keys['KeyW']?1:0) || mv.z;
+            if(kx || kz) {
+                const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); f.y=0; f.normalize();
+                const r = new THREE.Vector3().crossVectors(camera.up, f).negate();
+                const next = camera.position.clone().addScaledVector(f, -kz*0.13).addScaledVector(r, kx*0.13);
+                if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.6,1.8,0.6)).intersectsBox(c.box))) camera.position.copy(next);
+            }
 
-            camera.position.y = 1.7 + Math.sin(t*0.008)*0.02;
+            if(previewMesh.visible) {
+                const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+                const pos = camera.position.clone().add(dir.multiplyScalar(3));
+                previewMesh.position.set(Math.round(pos.x), 2, Math.round(pos.z));
+                previewMesh.rotation.y = Math.round(camera.rotation.y / (Math.PI/2)) * (Math.PI/2);
+            }
 
-            // ★マルチプレイ時の歩行アニメーション同期処理
-            otherPlayers.forEach((m, id) => {
-                const u = m.userData;
-                // 位置と回転をヌルッと同期
-                m.position.lerp(u.targetPos, 0.15);
-                m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, u.targetRot, 0.15);
-                
-                // ★歩いているときは腕と脚を振る
-                if(u.walking) {
-                    // 脚のアニメーション（交互に振る）
-                    u.rLegP.rotation.x = Math.sin(t * 0.01) * 0.5; // 右脚
-                    u.lLegP.rotation.x = -Math.sin(t * 0.01) * 0.5; // 左脚
-                    
-                    // 腕のアニメーション（脚と逆に振る）
-                    u.rArmP.rotation.x = -Math.sin(t * 0.01) * 0.4; // 右腕
-                    u.lArmP.rotation.x = Math.sin(t * 0.01) * 0.4; // 左腕
-                } else {
-                    // 止まっているときは直立（ゆっくり戻す）
-                    u.rLegP.rotation.x *= 0.8; u.lLegP.rotation.x *= 0.8;
-                    u.rArmP.rotation.x *= 0.8; u.lArmP.rotation.x *= 0.8;
-                }
-            });
+            const cx = Math.round(camera.position.x/8), cz = Math.round(camera.position.z/8);
+            for(let i=-2; i<=2; i++) for(let j=-2; j<=2; j++) spawn(cx+i, cz+j);
+            pl.position.copy(camera.position);
 
-            const cx=Math.round(camera.position.x/8), cz=Math.round(camera.position.z/8);
-            for(let i=cx-2; i<=cx+2; i++) for(let j=cz-2; j<=cz+2; j++) spawn(i,j);
-            light.position.copy(camera.position);
+            if(t - lastSend > 100) { 
+                set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y, walking: (kx||kz) }); 
+                lastSend = t; 
+            }
             renderer.render(scene, camera);
             document.getElementById('timer').innerText = new Date(t).toISOString().substr(14, 8);
-
-            // ★自分の歩行状態（walking）をFirebaseに送信
-            const isMyWalking = (kx !== 0 || kz !== 0 || mv.x !== 0 || mv.z !== 0);
-            if(t - lastSend > 100 && (camera.position.distanceTo(lastPos) > 0.01 || Math.random() > 0.8)) {
-                set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y, walking: isMyWalking });
-                lastSend = t; lastPos.copy(camera.position);
-            }
         }
         animate(0);
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
     </script>
 </body>
 </html>
