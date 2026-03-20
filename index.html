@@ -3,38 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - Mobile Fixed</title>
+    <title>Backrooms MMO - Jump & Mobile Fixed</title>
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; position: fixed; width: 100vw; height: 100vh; }
         canvas { display: block; width: 100%; height: 100%; filter: contrast(1.1) brightness(1.1); }
         
         #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; color: #0f0; font-family: monospace; }
-        .vhs-text { position: absolute; top: 10px; left: 10px; font-size: 12px; text-shadow: 1px 1px #000; }
+        .vhs-text { position: absolute; top: 10px; left: 10px; font-size: 11px; text-shadow: 1px 1px #000; }
         
-        /* 建築ボタン */
-        #build-menu { position: absolute; bottom: 20px; right: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; pointer-events: auto; z-index: 200; }
-        .build-btn { width: 50px; height: 50px; background: rgba(0,255,0,0.1); border: 2px solid #0f0; color: #0f0; font-size: 10px; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
+        /* 操作系UI */
+        #controls-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; z-index: 150; }
+        
+        #build-menu { position: absolute; top: 10px; right: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; pointer-events: auto; }
+        .ui-btn { width: 50px; height: 50px; background: rgba(0,255,0,0.1); border: 2px solid #0f0; color: #0f0; font-size: 10px; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; pointer-events: auto; }
         .active-btn { background: rgba(0,255,0,0.5); }
         .del-btn { border-color: #f00; color: #f00; }
 
-        /* スティック */
-        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); pointer-events: none; z-index: 150; }
+        /* ジャンプボタン */
+        #jump-btn { position: absolute; bottom: 110px; right: 30px; width: 70px; height: 70px; border-radius: 50%; border: 3px solid rgba(0,255,0,0.5); background: rgba(0,255,0,0.1); color: #0f0; display: flex; align-items: center; justify-content: center; font-weight: bold; pointer-events: auto; z-index: 200; }
+        #jump-btn:active { background: rgba(0,255,0,0.4); transform: scale(0.95); }
+
+        /* スティック表示用 */
+        #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid rgba(0,255,0,0.5); border-radius: 50%; background: rgba(0,255,0,0.1); pointer-events: none; }
         #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; }
-        #crosshair { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; border: 1px solid #0f0; border-radius: 50%; margin: -3px; pointer-events: none; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>PLAYERS: <span id="p-count">1</span><br>MODE: <span id="current-item">EXPLORE</span></div>
-        <div id="crosshair"></div>
+        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>PLAYERS: <span id="p-count">1</span><br>POS: <span id="pos-display">0, 0</span></div>
         <div id="build-menu">
-            <div class="build-btn" id="btn-wall" onclick="setBuild('wall')">WALL</div>
-            <div class="build-btn" id="btn-glass" onclick="setBuild('glass')">GLAS</div>
-            <div class="build-btn" id="btn-shutter" onclick="setBuild('shutter')">SHUT</div>
-            <div class="build-btn del-btn" id="btn-delete" onclick="setBuild('delete')">DEL</div>
+            <div class="ui-btn" id="btn-wall" onclick="setBuild('wall')">WALL</div>
+            <div class="ui-btn" id="btn-glass" onclick="setBuild('glass')">GLAS</div>
+            <div class="ui-btn" id="btn-shutter" onclick="setBuild('shutter')">SHUT</div>
+            <div class="ui-btn del-btn" id="btn-delete" onclick="setBuild('delete')">DEL</div>
         </div>
+        <div id="jump-btn">JUMP</div>
     </div>
+    
     <div id="joy-base"><div id="stick"></div></div>
 
     <script type="importmap">
@@ -65,18 +71,16 @@
         const db = getDatabase(app);
         const myId = "P_" + Math.random().toString(36).substring(2, 7);
         const myRef = ref(db, 'players/' + myId);
-        const playersRef = ref(db, 'players');
         const buildRef = ref(db, 'builds');
 
-        // --- Three.js Setup ---
+        // --- Three.js ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a00);
         scene.fog = new THREE.Fog(0x1a1a00, 1, 15);
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 50);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
         camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
         document.body.appendChild(renderer.domElement);
         scene.add(new THREE.AmbientLight(0xffffff, 0.15));
         const flash = new THREE.SpotLight(0xffffff, 10, 12, Math.PI/6, 0.5, 1);
@@ -84,26 +88,39 @@
         scene.add(camera);
 
         const colliders = [], chunks = new Map(), otherPlayers = new Map(), userBuilds = new Map();
-        const mats = { wall: new THREE.MeshLambertMaterial({ color: 0xddcc66 }), glass: new THREE.MeshLambertMaterial({ color: 0x88aabb, transparent: true, opacity: 0.3 }), shutter: new THREE.MeshLambertMaterial({ color: 0x666666, side: THREE.DoubleSide }) };
+        const mats = { wall: new THREE.MeshLambertMaterial({color: 0xddcc66}), glass: new THREE.MeshLambertMaterial({color: 0x88aabb, transparent:true, opacity:0.3}), shutter: new THREE.MeshLambertMaterial({color: 0x666666, side:THREE.DoubleSide}) };
 
-        // --- Build Logic ---
-        const previewMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }));
+        // --- Jump Logic ---
+        let velocityY = 0;
+        const gravity = -0.01;
+        const jumpForce = 0.18;
+        let isGrounded = true;
+
+        function doJump() {
+            if(isGrounded) {
+                velocityY = jumpForce;
+                isGrounded = false;
+            }
+        }
+        document.getElementById('jump-btn').addEventListener('touchstart', (e) => { e.preventDefault(); doJump(); });
+        document.getElementById('jump-btn').addEventListener('mousedown', (e) => { doJump(); });
+
+        // --- Build ---
+        const previewMesh = new THREE.Mesh(new THREE.BoxGeometry(2,4,0.2), new THREE.MeshBasicMaterial({color:0x00ff00, wireframe:true}));
         previewMesh.visible = false; scene.add(previewMesh);
         let buildType = null;
 
         window.setBuild = (type) => {
             buildType = (buildType === type) ? null : type;
-            document.getElementById('current-item').innerText = buildType ? buildType.toUpperCase() : "EXPLORE";
-            document.querySelectorAll('.build-btn').forEach(b => b.classList.remove('active-btn'));
+            document.querySelectorAll('.ui-btn').forEach(b => b.classList.remove('active-btn'));
             previewMesh.visible = (buildType && buildType !== 'delete');
             if(buildType) document.getElementById('btn-' + type).classList.add('active-btn');
         };
 
-        const raycaster = new THREE.Raycaster();
         function handleAction() {
             if(buildType === 'delete') {
-                raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
-                const hits = raycaster.intersectObjects(scene.children);
+                const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(0,0), camera);
+                const hits = ray.intersectObjects(scene.children);
                 const target = hits.find(h => h.object.userData.isBuild);
                 if(target) remove(ref(db, 'builds/' + target.object.userData.dbKey));
             } else if(buildType) {
@@ -112,65 +129,59 @@
         }
 
         // --- Sync ---
-        onValue(playersRef, (snap) => {
+        onValue(ref(db, 'players'), (snap) => {
             const data = snap.val(); if(!data) return;
             document.getElementById('p-count').innerText = Object.keys(data).length;
             for(let id in data) {
                 if(id === myId) continue;
                 if(!otherPlayers.has(id)) {
                     const g = new THREE.Group();
-                    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 1), mats.wall); body.position.y=0.8; g.add(body);
-                    scene.add(g); otherPlayers.set(id, g); g.userData = { targetPos: new THREE.Vector3(), targetRot: 0 };
+                    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,1.4), mats.wall); b.position.y=0.7; g.add(b);
+                    scene.add(g); otherPlayers.set(id, g); g.userData = { targetPos: new THREE.Vector3() };
                 }
-                const m = otherPlayers.get(id); m.userData.targetPos.set(data[id].x, data[id].y-1.7, data[id].z); m.userData.targetRot = data[id].ry;
+                otherPlayers.get(id).userData.targetPos.set(data[id].x, data[id].y-1.7, data[id].z);
+                otherPlayers.get(id).rotation.y = data[id].ry;
             }
         });
-        onChildAdded(buildRef, (snap) => {
-            const d = snap.val(); const m = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 0.2), mats[d.type]);
-            m.position.set(d.x, 2, d.z); m.rotation.y = d.ry; m.userData.isBuild = true; m.userData.dbKey = snap.key;
-            scene.add(m); userBuilds.set(snap.key, m); colliders.push({ box: new THREE.Box3().setFromObject(m), key: snap.key });
+        onChildAdded(buildRef, snap => {
+            const d = snap.val(); const m = new THREE.Mesh(new THREE.BoxGeometry(2,4,0.2), mats[d.type]);
+            m.position.set(d.x, 2, d.z); m.rotation.y = d.ry; m.userData.isBuild=true; m.userData.dbKey=snap.key;
+            scene.add(m); userBuilds.set(snap.key, m); colliders.push({box: new THREE.Box3().setFromObject(m), key:snap.key});
         });
-        onChildRemoved(buildRef, snap => { 
+        onChildRemoved(buildRef, snap => {
             const m = userBuilds.get(snap.key); if(m) scene.remove(m); userBuilds.delete(snap.key);
-            const i = colliders.findIndex(c => c.key === snap.key); if(i>-1) colliders.splice(i, 1);
+            const idx = colliders.findIndex(c => c.key === snap.key); if(idx>-1) colliders.splice(idx,1);
         });
 
-        // --- MOBILE & PC CONTROLS ---
-        let keys = {}, mv = {x:0, z:0}, moveId = null, lookId = null, lastL = {x:0, y:0};
-        
-        // Touch Start
+        // --- Mobile Controls (Fixed Multi-touch) ---
+        let mv = {x:0, z:0}, moveId = null, lookId = null, lastL = {x:0, y:0};
         window.addEventListener('touchstart', e => {
             for(let t of e.changedTouches) {
-                if(t.clientX < window.innerWidth / 2) { // 画面左
+                if(t.clientX < window.innerWidth / 2 && moveId === null) {
                     moveId = t.identifier;
-                } else { // 画面右
-                    if(!e.target.classList.contains('build-btn')) {
-                        if(buildType) handleAction();
-                        lookId = t.identifier; lastL = {x:t.clientX, y:t.clientY};
-                    }
+                } else if(lookId === null && !e.target.closest('#build-menu') && !e.target.closest('#jump-btn')) {
+                    if(buildType) handleAction();
+                    lookId = t.identifier; lastL = {x:t.clientX, y:t.clientY};
                 }
             }
         }, {passive: false});
 
-        // Touch Move
         window.addEventListener('touchmove', e => {
             e.preventDefault();
             for(let t of e.touches) {
                 if(t.identifier === moveId) {
-                    const base = {x: 80, y: window.innerHeight - 80}; // スティック中心
-                    const dx = t.clientX - base.x, dy = t.clientY - base.y;
+                    const dx = t.clientX - 80, dy = t.clientY - (window.innerHeight - 80);
                     const d = Math.min(35, Math.sqrt(dx*dx+dy*dy)), a = Math.atan2(dy, dx);
-                    mv = {x: Math.cos(a) * (d/35), z: Math.sin(a) * (d/35)};
+                    mv = {x: Math.cos(a)*(d/35), z: Math.sin(a)*(d/35)};
                     document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
                 } else if(t.identifier === lookId) {
-                    camera.rotation.y -= (t.clientX - lastL.x) * 0.008;
-                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastL.y) * 0.008));
+                    camera.rotation.y -= (t.clientX - lastL.x) * 0.007;
+                    camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - lastL.y) * 0.007));
                     lastL = {x:t.clientX, y:t.clientY};
                 }
             }
         }, {passive: false});
 
-        // Touch End
         window.addEventListener('touchend', e => {
             for(let t of e.changedTouches) {
                 if(t.identifier === moveId) { moveId = null; mv = {x:0, z:0}; document.getElementById('stick').style.transform = 'none'; }
@@ -179,10 +190,11 @@
         });
 
         // PC Controls
-        window.addEventListener('keydown', e => keys[e.code] = true);
+        let keys = {};
+        window.addEventListener('keydown', e => { keys[e.code] = true; if(e.code === 'Space') doJump(); });
         window.addEventListener('keyup', e => keys[e.code] = false);
-        window.addEventListener('mousemove', e => { if(document.pointerLockElement) { camera.rotation.y -= e.movementX*0.002; camera.rotation.x -= e.movementY*0.002; } });
-        renderer.domElement.addEventListener('mousedown', () => { if(document.pointerLockElement) handleAction(); else renderer.domElement.requestPointerLock(); });
+        window.addEventListener('mousemove', e => { if(document.pointerLockElement) { camera.rotation.y -= e.movementX*0.002; camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY*0.002)); } });
+        renderer.domElement.addEventListener('mousedown', () => { if(document.pointerLockElement && buildType) handleAction(); else renderer.domElement.requestPointerLock(); });
 
         // --- Maze Generator ---
         function spawn(cx, cz) {
@@ -194,16 +206,22 @@
                 const p = new THREE.Mesh(new THREE.BoxGeometry(1,4,1), mats.wall); p.position.y=2; g.add(p);
                 colliders.push({box: new THREE.Box3().setFromObject(p).translate(new THREE.Vector3(cx*8,0,cz*8))});
             }
-            if(Math.abs(Math.sin(cx*1.3+cz*0.7)) > 0.8) {
-                const w = new THREE.Mesh(new THREE.BoxGeometry(8,4,0.1), mats.wall); w.position.set(0,2,4); g.add(w);
-                colliders.push({box: new THREE.Box3().setFromObject(w).translate(new THREE.Vector3(cx*8,0,cz*8))});
-            }
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(`${cx},${cz}`, g);
         }
 
         let lastSend = 0;
         function animate(t) {
             requestAnimationFrame(animate);
+            
+            // Physics (Jump & Gravity)
+            velocityY += gravity;
+            camera.position.y += velocityY;
+            if(camera.position.y <= 1.7) {
+                camera.position.y = 1.7;
+                velocityY = 0;
+                isGrounded = true;
+            }
+
             // Move
             let kx = (keys['KeyD']?1:0)-(keys['KeyA']?1:0) || mv.x;
             let kz = (keys['KeyS']?1:0)-(keys['KeyW']?1:0) || mv.z;
@@ -213,16 +231,15 @@
                 const next = camera.position.clone().addScaledVector(f, -kz*0.12).addScaledVector(r, kx*0.12);
                 if(!colliders.some(c => new THREE.Box3().setFromCenterAndSize(next, new THREE.Vector3(0.6,1.8,0.6)).intersectsBox(c.box))) camera.position.copy(next);
             }
-            // Preview
-            if(buildType && buildType !== 'delete') {
-                const target = camera.position.clone().add(new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).multiplyScalar(3));
-                previewMesh.position.set(Math.round(target.x), 2, Math.round(target.z));
-                previewMesh.rotation.y = Math.round(camera.rotation.y / (Math.PI/2)) * (Math.PI/2);
+
+            // Other Players Lerp
+            otherPlayers.forEach(m => m.position.lerp(m.userData.targetPos, 0.2));
+
+            if(t - lastSend > 100) { 
+                set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y }); lastSend = t; 
+                document.getElementById('pos-display').innerText = `${Math.round(camera.position.x)}, ${Math.round(camera.position.z)}`;
             }
-            // Other Players
-            otherPlayers.forEach(m => { m.position.lerp(m.userData.targetPos, 0.2); m.rotation.y = THREE.MathUtils.lerp(m.rotation.y, m.userData.targetRot, 0.2); });
-            if(t - lastSend > 100) { set(myRef, { x: camera.position.x, y: camera.position.y, z: camera.position.z, ry: camera.rotation.y }); lastSend = t; }
-            // World
+            
             for(let i=-2; i<=2; i++) for(let j=-2; j<=2; j++) spawn(Math.round(camera.position.x/8)+i, Math.round(camera.position.z/8)+j);
             renderer.render(scene, camera);
         }
