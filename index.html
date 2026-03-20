@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Backrooms MMO - Human Inspector</title>
+    <title>Backrooms MMO - Full Scale Human</title>
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; -webkit-user-select: none; position: fixed; width: 100vw; height: 100vh; }
@@ -13,7 +13,6 @@
         #build-menu { position: absolute; top: 10px; right: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; pointer-events: auto; }
         .ui-btn { width: 50px; height: 50px; background: rgba(0,255,0,0.1); border: 2px solid #0f0; color: #0f0; font-size: 10px; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
         .active-btn { background: rgba(0,255,0,0.5); box-shadow: 0 0 10px #0f0; }
-        .del-btn { border-color: #f00; color: #f00; }
         #jump-btn { position: absolute; bottom: 120px; right: 30px; width: 70px; height: 70px; border-radius: 50%; border: 3px solid #0f0; background: rgba(0,255,0,0.2); color: #0f0; display: flex; align-items: center; justify-content: center; font-weight: bold; pointer-events: auto; z-index: 200; }
         #joy-base { position: absolute; bottom: 40px; left: 40px; width: 80px; height: 80px; border: 2px solid #0f0; border-radius: 50%; background: rgba(0,255,0,0.1); pointer-events: none; }
         #stick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px; background: #0f0; border-radius: 50%; }
@@ -22,7 +21,7 @@
 </head>
 <body>
     <div id="ui">
-        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>A-SYNC UNIT: INSPECTOR<br>MODE: <span id="mode-text">EXPLORE</span></div>
+        <div class="vhs-text">REC ● <span id="timer">00:00:00</span><br>A-SYNC UNIT: INSPECTOR<br>STATUS: STANDING</div>
         <div id="crosshair"></div>
         <div id="build-menu">
             <div class="ui-btn" id="btn-wall" onclick="setBuild('wall')">WALL</div>
@@ -66,14 +65,16 @@
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x2a2a00);
-        scene.fog = new THREE.Fog(0x2a2a00, 1, 18);
+        scene.fog = new THREE.Fog(0x2a2a00, 1, 20);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50);
+        // ★初期位置を高く設定 (1.7m)
         camera.position.set(0, 1.7, 0); camera.rotation.order = 'YXZ';
+        
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-        const pl = new THREE.PointLight(0xffffff, 5, 12); scene.add(pl);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const pl = new THREE.PointLight(0xffffff, 5, 15); scene.add(pl);
 
         const colliders = [], chunks = new Map(), otherPlayers = new Map(), userBuilds = new Map();
         const mats = { 
@@ -82,43 +83,43 @@
             shutter: new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.8 })
         };
 
-        // --- 人間アバター (A-Sync Inspector) ---
+        // --- 等身大人間アバター作成 ---
         function createHumanInspector() {
             const group = new THREE.Group();
-            const m = new THREE.MeshStandardMaterial({color: 0xddcc00, roughness: 0.4});
-            const v = new THREE.MeshStandardMaterial({color: 0x0a0a0a, metalness: 0.8});
+            const m = new THREE.MeshStandardMaterial({color: 0xeeee00, roughness: 0.4});
+            const v = new THREE.MeshStandardMaterial({color: 0x0a0a0a, metalness: 0.9});
 
-            // 胴体 (人体らしい厚み)
-            const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 0.65, 8), m);
-            torso.position.y = 1.0; group.add(torso);
+            // 胴体 (サイズアップ)
+            const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 0.8, 8), m);
+            torso.position.y = 1.1; group.add(torso);
 
-            // 頭部 & バイザー
-            const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), m);
-            head.position.y = 1.45; group.add(head);
-            const visor = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 12), v);
-            visor.scale.set(1.1, 0.9, 0.6); visor.position.set(0, 1.45, 0.12); group.add(visor);
+            // 頭部 (サイズアップ)
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 12), m);
+            head.position.y = 1.65; group.add(head);
+            const visor = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), v);
+            visor.scale.set(1.1, 0.8, 0.5); visor.position.set(0, 1.65, 0.15); group.add(visor);
 
             // バックパック
-            const pack = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.55, 0.18), m);
-            pack.position.set(0, 1.05, -0.22); group.add(pack);
+            const pack = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.25), m);
+            pack.position.set(0, 1.2, -0.25); group.add(pack);
 
-            // 腕 (肩関節あり)
-            const rArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.5, 4, 4), m);
-            rArm.position.set(-0.32, 1.1, 0); group.add(rArm);
-            const lArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.5, 4, 4), m);
-            lArm.position.set(0.32, 1.1, 0); group.add(lArm);
+            // 腕 (人間らしい長さ)
+            const rArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.7, 4, 4), m);
+            rArm.position.set(-0.4, 1.2, 0); group.add(rArm);
+            const lArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.7, 4, 4), m);
+            lArm.position.set(0.4, 1.2, 0); group.add(lArm);
 
-            // 脚 (二股)
-            const rLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.6, 4, 4), m);
-            rLeg.position.set(-0.14, 0.45, 0); group.add(rLeg);
-            const lLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.6, 4, 4), m);
-            lLeg.position.set(0.14, 0.45, 0); group.add(lLeg);
+            // 脚 (人間らしい長さ 0.9m)
+            const rLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.9, 4, 4), m);
+            rLeg.position.set(-0.18, 0.45, 0); group.add(rLeg);
+            const lLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.9, 4, 4), m);
+            lLeg.position.set(0.18, 0.45, 0); group.add(lLeg);
 
             group.userData = { rArm, lArm, rLeg, lLeg };
             return group;
         }
 
-        // --- 建築 & 生成ロジック ---
+        // --- 迷路生成 & 建築 ---
         function spawn(cx, cz) {
             const k = `${cx},${cz}`; if(chunks.has(k)) return;
             const g = new THREE.Group();
@@ -126,7 +127,7 @@
             const wMat = new THREE.MeshLambertMaterial({color:0xddcc66});
             const c = new THREE.Mesh(new THREE.PlaneGeometry(8,8), wMat); c.position.y=4; c.rotateX(Math.PI/2); g.add(c);
             if(Math.abs(cx%2)===1 && Math.abs(cz%2)===1) {
-                const p = new THREE.Mesh(new THREE.BoxGeometry(1.2,4,1.2), wMat); p.position.y=2; g.add(p);
+                const p = new THREE.Mesh(new THREE.BoxGeometry(1.5,4,1.5), wMat); p.position.y=2; g.add(p);
                 colliders.push({box: new THREE.Box3().setFromObject(p).translate(new THREE.Vector3(cx*8,0,cz*8))});
             }
             g.position.set(cx*8, 0, cz*8); scene.add(g); chunks.set(k, g);
@@ -139,7 +140,6 @@
             buildType = (buildType === type) ? null : type;
             document.querySelectorAll('.ui-btn').forEach(b => b.classList.remove('active-btn'));
             previewMesh.visible = (buildType && buildType !== 'delete');
-            document.getElementById('mode-text').innerText = buildType ? buildType.toUpperCase() : "EXPLORE";
             if(buildType) document.getElementById('btn-' + type).classList.add('active-btn');
         };
 
@@ -163,7 +163,7 @@
                 if(d[id].walking) {
                     const t = Date.now() * 0.01;
                     m.userData.rLeg.rotation.x = Math.sin(t)*0.5; m.userData.lLeg.rotation.x = -Math.sin(t)*0.5;
-                } else { m.userData.rLeg.rotation.x = 0; m.userData.lLeg.rotation.x = 0; }
+                }
             }
         });
         onChildAdded(buildRef, snap => {
@@ -175,7 +175,6 @@
             const m = userBuilds.get(snap.key); if(m) scene.remove(m); userBuilds.delete(snap.key);
             const idx = colliders.findIndex(c => c.key === snap.key); if(idx>-1) colliders.splice(idx, 1);
         });
-        onDisconnect(myRef).remove();
 
         // --- Controls ---
         let keys = {}, mv = {x:0, z:0}, moveId = null, lookId = null, lastL = {x:0, y:0}, vY = 0, isG = true;
